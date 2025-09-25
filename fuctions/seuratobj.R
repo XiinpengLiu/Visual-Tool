@@ -6,10 +6,10 @@ library(ggplot2)
 library(patchwork)
 library(SeuratWrappers)
 library(glmGamPoi)
-library(EnsDb.Hsapiens.v86)
+# library(EnsDb.Hsapiens.v86)
 options(future.globals.maxSize = 2000 * 1024^2)
 # BiocManager::install("EnsDb.Hsapiens.v86")
-setwd("E:/Project/H160_pPer_scRNAseq_snATACseq_counts/ATAC_counts")
+setwd("~/work/Project/H160_pPer_scRNAseq_snATACseq_counts/ATAC_counts")
 # conda install -c conda-forge hdf5 r-hdf5r
 counts <- Read10X_h5(filename = "H160_pPer_filtered_peak_bc_matrix.h5")
 
@@ -66,10 +66,7 @@ rm(seurat_obj)
 # 
 # granges(pbmc)
 
-# 为对象添加一个样本标识
-seurat_obj$Sample <- 'H160_pPer'
-
-H_RNA <- Read10X_h5('E:/Project/H160_pPer_scRNAseq_snATACseq_counts/GEX_counts/H160_pPer_GEX_filtered_feature_bc_matrix.h5')
+H_RNA <- Read10X_h5('~/work/Project/H160_pPer_scRNAseq_snATACseq_counts/GEX_counts/H160_pPer_GEX_filtered_feature_bc_matrix.h5')
 
 #----------------------------------------------------------------mergetest
 
@@ -80,9 +77,6 @@ mat <- if (is.list(H_RNA)) {
 } else {
   H_RNA
 }
-
-# 可选：给细胞加上样本前缀，避免后续合并冲突
-colnames(mat) <- paste0("H160_", colnames(mat))
 
 # 建立Seurat对象
 seurat_obj_rna <- CreateSeuratObject(
@@ -113,6 +107,10 @@ rm(seurat_obj_rna)
 
 seurat_obj_rna.downsampled[["RNA"]] <- as(seurat_obj_rna.downsampled[["RNA"]], Class = "Assay5")
 
+output_file <- "~/work/Project/output/seurat_obj_rna_downsampled.rds"
+saveRDS(seurat_obj_rna.downsampled, file = "~/work/Project/seurat_obj_rna_downsampled.rds")
+
+
 seurat_obj_rna.downsampled <- NormalizeData(seurat_obj_rna.downsampled)
 seurat_obj_rna.downsampled <- FindVariableFeatures(seurat_obj_rna.downsampled)
 seurat_obj_rna.downsampled <- ScaleData(seurat_obj_rna.downsampled)
@@ -135,30 +133,31 @@ seurat_obj.downsampled <- RunTFIDF(seurat_obj.downsampled)
 seurat_obj.downsampled <- FindTopFeatures(seurat_obj.downsampled, min.cutoff = "q0")
 seurat_obj.downsampled <- RunSVD(seurat_obj.downsampled)
 seurat_obj.downsampled <- RunUMAP(seurat_obj.downsampled, reduction = "lsi", dims = 2:30, reduction.name = "umap.atac", reduction.key = "atacUMAP_")
-#----------------------------------------------------------
-# quantify gene activity
-gene.activities <- GeneActivity(seurat_obj.downsampled, features = VariableFeatures(seurat_obj_rna.downsampled))
-# add gene activities as a new assay
-seurat_obj.downsampled[["ACTIVITY"]] <- CreateAssayObject(counts = gene.activities)
 
-# normalize gene activities
-DefaultAssay(seurat_obj.downsampled) <- "ACTIVITY"
-seurat_obj.downsampled <- NormalizeData(seurat_obj.downsampled)
-seurat_obj.downsampled <- ScaleData(seurat_obj.downsampled, features = rownames(seurat_obj.downsampled))
+# #----------------------------------------------------------
+# # quantify gene activity
+# gene.activities <- GeneActivity(seurat_obj.downsampled, features = VariableFeatures(seurat_obj_rna.downsampled))
+# # add gene activities as a new assay
+# seurat_obj.downsampled[["ACTIVITY"]] <- CreateAssayObject(counts = gene.activities)
 
-# Identify anchors
-transfer.anchors <- FindTransferAnchors(reference = seurat_obj_rna.downsampled, query = seurat_obj.downsampled, features = VariableFeatures(object = seurat_obj_rna.downsampled),
-                                        reference.assay = "RNA", query.assay = "ACTIVITY", reduction = "cca")
+# # normalize gene activities
+# DefaultAssay(seurat_obj.downsampled) <- "ACTIVITY"
+# seurat_obj.downsampled <- NormalizeData(seurat_obj.downsampled)
+# seurat_obj.downsampled <- ScaleData(seurat_obj.downsampled, features = rownames(seurat_obj.downsampled))
 
-celltype.predictions <- TransferData(anchorset = transfer.anchors, refdata = seurat_obj_rna.downsampled$seurat_clusters,
-                                     weight.reduction = seurat_obj.downsampled[["lsi"]], dims = 2:30)
+# # Identify anchors
+# transfer.anchors <- FindTransferAnchors(reference = seurat_obj_rna.downsampled, query = seurat_obj.downsampled, features = VariableFeatures(object = seurat_obj_rna.downsampled),
+#                                         reference.assay = "RNA", query.assay = "ACTIVITY", reduction = "cca")
 
-seurat_obj.downsampled <- AddMetaData(seurat_obj.downsampled, metadata = celltype.predictions)
+# celltype.predictions <- TransferData(anchorset = transfer.anchors, refdata = seurat_obj_rna.downsampled$seurat_clusters,
+#                                      weight.reduction = seurat_obj.downsampled[["lsi"]], dims = 2:30)
 
-p1 <- DimPlot(seurat_obj.downsampled, group.by = "predicted.id", label = TRUE) + NoLegend() + ggtitle("Predicted annotation")
+# seurat_obj.downsampled <- AddMetaData(seurat_obj.downsampled, metadata = celltype.predictions)
 
-# 保存图像
-ggsave("predicted_annotation_plot.png", plot = p1, width = 10, height = 8, dpi = 300)
+# p1 <- DimPlot(seurat_obj.downsampled, group.by = "predicted.id", label = TRUE) + NoLegend() + ggtitle("Predicted annotation")
+
+# # 保存图像
+# ggsave("predicted_annotation_plot.png", plot = p1, width = 10, height = 8, dpi = 300)
 
 
 
