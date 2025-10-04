@@ -30,10 +30,10 @@ p_percent_mt <- VlnPlot(se_rna, features = "percent.mt", pt.size = 0, group.by =
   NoLegend()
 
 # 使用 patchwork 组合图
-se_atac_violin_plots <- p_features + p_counts + p_percent_mt+ plot_layout(ncol = 3)
+se_rna_violin_plots <- p_features + p_counts + p_percent_mt+ plot_layout(ncol = 3)
 
 # 打印组合图
-print(se_atac_violin_plots)
+print(se_rna_violin_plots)
 
 
 # ---- 散点图 ----
@@ -45,10 +45,6 @@ se_rna <- subset(se_rna, subset = nFeature_RNA > min_features & nFeature_RNA < m
 
 #ATAC-QC-------------------------------------------------------------
 
-VlnPlot(object = se_atac , features = 'nCount_peaks') +
-  geom_hline(yintercept = 2000, linetype = "dashed", color = "red") +
-  geom_hline(yintercept = 30000, linetype = "dashed", color = "blue")
-
 # 计算每个细胞的核小体信号：
 se_atac  <- NucleosomeSignal(object = se_atac )
 
@@ -58,14 +54,35 @@ se_atac$nucleosome_group <- ifelse(se_atac$nucleosome_signal > 4, 'NS > 4', 'NS 
 # 通过柱状图可视化'NS > 4', 'NS < 4'两组的fragment分布情况：
 FragmentHistogram(object = se_atac , group.by = 'nucleosome_group')
 
-makecore <- function(workcore,memory){
-  if(!require(Seurat))install.packages('Seurat')
-  if(!require(future))install.packages('future')
-  plan("multisession", workers = workcore)
-  options(future.globals.maxSize= memory*1024*1024**2)
-}
-makecore(10,10)
+plan("sequential")
 
 se_atac  <- TSSEnrichment(object = se_atac )
 
+DensityScatter(se_atac , x = 'nCount_peaks', y = 'TSS.enrichment', log_x = TRUE, 
+               quantiles = TRUE)
 
+# 计算 pct_reads_in_peaks比例：
+se_atac$pct_reads_in_peaks <- se_atac$peak_region_fragments / se_atac$passed_filters * 100
+
+se_atac$blacklist_ratio <- FractionCountsInRegion(
+  object = se_atac, 
+  assay = 'peaks',
+  regions = blacklist_hg38_unified
+)
+
+atsc1 <- VlnPlot(object = se_atac , features = 'nCount_peaks') +
+  geom_hline(yintercept = 2000, linetype = "dashed", color = "red") +
+  geom_hline(yintercept = 30000, linetype = "dashed", color = "blue")
+
+atsc2 <- VlnPlot(object = se_atac,features = c( 'pct_reads_in_peaks'))+  geom_hline(yintercept = 40, linetype = "dashed", color = "red")
+
+atsc3 <- VlnPlot(object = se_atac ,features = c( 'TSS.enrichment'))+  geom_hline(yintercept = 4, linetype = "dashed", color = "red")
+
+atsc4 <- VlnPlot(object = se_atac,features = c( 'blacklist_ratio'))+  geom_hline(yintercept = 0.02, linetype = "dashed", color = "red")
+
+# 在 plot_layout 中添加 guides = 'collect'
+se_atac_violin_plots <- atsc1 + atsc2 + atsc3 + atsc4 + 
+  plot_layout(ncol = 4, guides = 'collect')
+
+# 打印组合图
+print(se_atac_violin_plots)

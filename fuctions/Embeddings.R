@@ -1,5 +1,3 @@
-# 安装一次即可
-# install.packages("tidyseurat")   # CRAN
 library(tidyseurat)
 library(dplyr)
 library(tidyr)
