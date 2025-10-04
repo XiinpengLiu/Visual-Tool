@@ -1,15 +1,17 @@
 library(Seurat)
 library(ggplot2)
 library(patchwork)
-setwd("~/work/Project")
-se_rna <- readRDS("seurat_obj_rna_downsampled.rds")
-se_atac <- readRDS("seurat_obj_atac_downsampled.rds")
+setwd("E:/Project")
+se_rna <- readRDS("seurat_obj_rna.rds")
+se_atac <- readRDS("seurat_obj_atac.rds")
 
 #RNA-QC-------------------------------------------------------------
 
 min_features <- 200    # 最低基因数
 max_features <- 6000   # 最高基因数 (用于去除多细胞团)
 max_percent_mt <- 10   # 最高线粒体基因百分比
+
+se_rna[["percent.mt"]] <- PercentageFeatureSet(se_rna,pattern = "^MT-")
 
 p_features <- VlnPlot(se_rna, features = "nFeature_RNA", pt.size = 0, group.by = "orig.ident") +
   geom_hline(yintercept = min_features, linetype = "dashed", color = "red") +
@@ -41,7 +43,14 @@ plot1 <- FeatureScatter(se_rna, feature1 = "nCount_RNA", feature2 = "percent.mt"
 plot2 <- FeatureScatter(se_rna, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
 plot1 + plot2
 
-se_rna <- subset(se_rna, subset = nFeature_RNA > min_features & nFeature_RNA < max_features & max_percent_mt < 5)
+print(paste0('过滤前的细胞数量为：',ncol(se_rna)))
+
+se_rna <- subset(se_rna, subset = nFeature_RNA > min_features & nFeature_RNA < max_features & percent.mt < max_percent_mt)
+
+print(paste0('过滤前的细胞数量为：',ncol(se_rna)))
+
+saveRDS(se_rna, file = "E:/Project/seurat_obj_atac_QC.rds")
+
 
 #ATAC-QC-------------------------------------------------------------
 
@@ -74,15 +83,31 @@ atsc1 <- VlnPlot(object = se_atac , features = 'nCount_peaks') +
   geom_hline(yintercept = 2000, linetype = "dashed", color = "red") +
   geom_hline(yintercept = 30000, linetype = "dashed", color = "blue")
 
-atsc2 <- VlnPlot(object = se_atac,features = c( 'pct_reads_in_peaks'))+  geom_hline(yintercept = 40, linetype = "dashed", color = "red")
+atsc2 <- VlnPlot(object = se_atac,features = c( 'pct_reads_in_peaks'))+  geom_hline(yintercept = 20, linetype = "dashed", color = "red")
 
-atsc3 <- VlnPlot(object = se_atac ,features = c( 'TSS.enrichment'))+  geom_hline(yintercept = 4, linetype = "dashed", color = "red")
+atsc3 <- VlnPlot(object = se_atac ,features = c( 'TSS.enrichment'))+  geom_hline(yintercept = 2, linetype = "dashed", color = "red")
+
+atsc5 <- VlnPlot(object = se_atac,features = c( 'nucleosome_signal'))+  geom_hline(yintercept = 4, linetype = "dashed", color = "red")
 
 atsc4 <- VlnPlot(object = se_atac,features = c( 'blacklist_ratio'))+  geom_hline(yintercept = 0.02, linetype = "dashed", color = "red")
 
 # 在 plot_layout 中添加 guides = 'collect'
-se_atac_violin_plots <- atsc1 + atsc2 + atsc3 + atsc4 + 
-  plot_layout(ncol = 4, guides = 'collect')
+se_atac_violin_plots <- atsc1 + atsc2 + atsc3 + atsc4 + atsc5 +
+  plot_layout(ncol = 5, guides = 'collect')
 
 # 打印组合图
 print(se_atac_violin_plots)
+print(paste0('过滤后的细胞数量为：',ncol(se_atac)))
+se_atac <- subset(
+  x = se_atac,
+  subset = nCount_peaks > 2000 & 
+    nCount_peaks < 30000 & 
+    pct_reads_in_peaks > 20 & 
+    blacklist_ratio < 0.02 & 
+    nucleosome_signal < 4 & 
+    TSS.enrichment > 2
+)
+print(paste0('过滤后的细胞数量为：',ncol(se_atac)))
+saveRDS(se_atac, file = "E:/Project/seurat_obj_atac_QC.rds")
+
+
