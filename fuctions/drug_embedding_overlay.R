@@ -248,4 +248,6 @@ plot_drug_overlay(dslt,
                   drug_name = sel$drug_name,
                   output_path = output_path)
 
+
+saveRDS(dslt,"dslt.rds")
 message("脚本执行完成。")
