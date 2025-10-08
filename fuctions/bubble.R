@@ -9,17 +9,24 @@ suppressPackageStartupMessages({
 
 setwd("E:/Project")
 
+# config <- list(
+#   dslt_rds = "dslt.rds",
+#   cluster_assay = "RNA",
+#   cluster_column = "cluster_id",
+#   drug_assay = "cGR_mapped"
+# )
+
 config <- list(
   dslt_rds = "dslt.rds",
-  cluster_assay = "RNA",
-  cluster_column = "cluster_id",
+  cluster_assay = "all_drug_archetype",
+  cluster_column = "archetype",
   drug_assay = "cGR_mapped"
 )
 
 stopifnot(file.exists(config$dslt_rds))
 
-dslt <- readRDS(config$dslt_rds)
-stopifnot(inherits(dslt, "DatasetLT"))
+# dslt <- readRDS(config$dslt_rds)
+# stopifnot(inherits(dslt, "DatasetLT"))
 
 # 从 dslt assays 中提取 drugs
 config$drugs <- colnames(dslt[["assays"]][[config$drug_assay]])
