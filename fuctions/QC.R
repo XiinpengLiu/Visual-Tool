@@ -111,3 +111,23 @@ print(paste0('过滤后的细胞数量为：',ncol(se_atac)))
 saveRDS(se_atac, file = "E:/Project/seurat_obj_atac_QC.rds")
 
 
+se_rna <- readRDS("seurat_obj_rna_QC.rds")
+
+keep_cells <- grep("-1$", colnames(se_rna), value = TRUE)
+if (!length(keep_cells)) stop("未找到以 -1 结尾的细胞条形码。")
+if (length(keep_cells) < ncol(se_rna)) {
+  se_rna_1 <- subset(se_rna, cells = keep_cells)
+}
+
+length(intersect(rownames(se_rna@meta.data), rownames(H160_r1_mapped_cGR_smoothed[["cGR_mapped"]])))
+
+length(intersect(rownames(se_rna_1@meta.data), rownames(H160_r1_mapped_cGR_smoothed[["cGR_mapped"]])))
+
+
+length(rownames(H160_r1_mapped_cGR_smoothed[["cGR_mapped"]]))
+
+
+
+
+
+

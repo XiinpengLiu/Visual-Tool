@@ -4,6 +4,8 @@ suppressPackageStartupMessages({
   library(Seurat)
   library(ggplot2)
   library(viridis)
+  library(mgcv)
+  library(ggnewscale)
 })
 
 setwd("E:/Project")
@@ -131,55 +133,75 @@ plot_drug_overlay <- function(
   df <- data.frame(embedding, cluster = cl_fac, drug_value = drug_z)
   x_col <- colnames(embedding)[1]; y_col <- colnames(embedding)[2]
   
+  
+  
+  if (sdv > 0 && any(is.finite(df$drug_value))) {
+    # 构造公式 drug_value ~ s(x, y)
+    fml <- as.formula(sprintf("drug_value ~ s(%s, %s, k = 80)", x_col, y_col))
+    fit <- mgcv::gam(fml, data = df, method = "REML")
+    
+    # 生成网格并预测
+    grid_res <- 200
+    xr <- range(df[[x_col]], na.rm = TRUE)
+    yr <- range(df[[y_col]], na.rm = TRUE)
+    grid <- expand.grid(
+      x = seq(xr[1], xr[2], length.out = grid_res),
+      y = seq(yr[1], yr[2], length.out = grid_res)
+    )
+    names(grid) <- c(x_col, y_col)
+    grid$z_hat <- predict(fit, newdata = grid, type = "response")
+    grid$z_hat <- pmax(pmin(grid$z_hat, z_cap), -z_cap)
+  } else {
+    grid <- NULL
+  }
+  
+  
+  
+  
   # Okabe–Ito 调色板（7 色，与你图中 0–6 个簇匹配；簇更多时会循环）
   okabe_ito <- c("#E69F00","#56B4E9","#009E73","#F0E442","#0072B2","#D55E00","#CC79A7")
   
   plt <- ggplot(df, aes_string(x = x_col, y = y_col)) +
-    
-    # 1) 背景灰点（让整体轮廓更清楚）
-    geom_point(color = "#D9D9D9", size = bg_pt_size, alpha = 0.8, stroke = 0) +
-    
-    geom_point(
-      aes(fill = drug_value, color = cluster),
-      shape = 21,
-      size  = drug_pt_size,
-      alpha = 0.95,
-      stroke = drug_pt_stroke   # 轮廓线粗细，>0 才能看到簇颜色
+    # 1) 簇彩色点（保持轻量、可透视）
+    geom_point(aes(color = cluster), size = cl_pt_size, alpha = 0.5, stroke = 0) +
+    scale_color_manual(
+      values = rep(okabe_ito, length.out = nlevels(df$cluster)),
+      na.translate = FALSE, name = "Cluster"
     ) +
     
-    # cluster 离散色
-    scale_color_manual(values = rep(okabe_ito, length.out = nlevels(df$cluster)),
-                       na.translate = FALSE, guide = guide_legend(override.aes = list(size = 3, alpha = 1))) +
+    # 2) 开启第二个颜色标度（给等高线用）
+    ggnewscale::new_scale_color() +
     
-    # 药物强度连续色（对称发散、等距刻度；极值用 z_cap）
-    scale_fill_gradient2(
+    # 3) 药物等高线（线条版；想要填充版见下方注释）
+    {
+      if (!is.null(grid)) {
+        geom_contour_filled(
+          data = grid,
+          mapping = aes(x = .data[[x_col]], y = .data[[y_col]], z = z_hat),
+          bins = 9, alpha = 0.6, show.legend = TRUE
+        ) +
+          ggnewscale::new_scale_fill() +  # 若之后还要再引入别的 fill 标度
+          scale_fill_gradient2(
+            low = "#2166AC", mid = "white", high = "#B2182B",
+            limits = c(-z_cap, z_cap), name = sprintf("%s z-score (smooth)", drug_name)
+          )
+      }
+    } +
+    scale_color_gradient2(
       low = "#2166AC", mid = "white", high = "#B2182B",
-      limits = c(-z_cap, z_cap), oob = squish,
-      breaks = pretty(c(-z_cap, z_cap), n = 5),
-      labels = number_format(accuracy = 0.1),
-      midpoint = 0, name = sprintf("%s z-score", drug_name)
+      limits = c(-z_cap, z_cap), name = sprintf("%s z-score (smooth)", drug_name)
     ) +
     
     coord_equal() +
     labs(
       title = sprintf("%s — %s overlay %s", assay_name, embedding_name, drug_name),
-      subtitle = "Grey: all cells • Color: clusters • Fill: drug z-score (clamped to ±3)",
+      subtitle = "Points: clusters • Contours: smoothed drug z-score (±cap)",
       x = x_col, y = y_col
     ) +
-    
     theme_classic(base_size = 12) +
     theme(
       plot.title    = element_text(face = "bold", size = 16, hjust = 0),
-      plot.subtitle = element_text(size = 10, margin = margin(b = 6)),
-      axis.title    = element_text(size = 11),
-      axis.text     = element_text(size = 9),
-      legend.title  = element_text(face = "bold"),
-      legend.text   = element_text(size = 9),
-      legend.box    = "vertical",
-      legend.spacing.y = unit(2, "pt"),
-      legend.key.height = unit(10, "pt"),
-      legend.key.width  = unit(12, "pt"),
-      plot.margin  = margin(8, 8, 8, 8)
+      plot.subtitle = element_text(size = 10, margin = margin(b = 6))
     )
   
   ggsave(output_path, plt, width = 7.2, height = 6.0, dpi = 320)
