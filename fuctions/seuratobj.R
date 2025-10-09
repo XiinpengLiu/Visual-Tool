@@ -82,7 +82,7 @@ mat <- if (is.list(H_RNA)) {
 seurat_obj_rna <- CreateSeuratObject(
   counts = mat,
   assay  = "RNA",
-  project = "H160",
+  project = "H160",#!!!!!!!!
   min.features = 200,
   min.cells = 3
 )

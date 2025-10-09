@@ -51,16 +51,61 @@ ui <- dashboardPage(
               column(width = 6,
                 h4("Lineage Level Data"),
                 fileInput("lineage_rds_file", 
-                         "Select Lineage RDS File:",
+                         "Select Lineage Drug response RDS File:",
                          accept = c(".rds", ".RDS")),
                 textOutput("lineage_upload_status")
               ),
               column(width = 6,
                 h4("Single Cell Level Data"),
                 fileInput("single_cell_rds_file", 
-                         "Select Single Cell RDS File:",
+                         "Select Single Cell response RDS File:",
                          accept = c(".rds", ".RDS")),
                 textOutput("single_cell_upload_status")
+              )
+            ),
+            
+            fluidRow(
+              column(width = 6,
+                     fileInput("lineage_rna_h5_file", 
+                               "Select Lineage RNA H5 File:",
+                               accept = c(".h5", ".H5")),
+                     textOutput("lineage_upload_rna_h5_status")
+              ),
+              column(width = 6,
+                     fileInput("single_cell_rna_h5_file", 
+                               "Select Single Cell RNA H5 File:",
+                               accept = c(".h5", ".H5")),
+                     textOutput("single_cell_upload_rna_h5_status")
+              )
+            ),
+            
+            fluidRow(
+              column(width = 6,
+                     fileInput("lineage_atac_h5_file", 
+                               "Select Lineage ATAC H5 File:",
+                               accept = c(".h5", ".H5")),
+                     textOutput("lineage_upload_atac_h5_status")
+              ),
+              column(width = 6,
+                     fileInput("single_cell_ATAC_h5_file", 
+                               "Select Single Cell ATAC H5 File:",
+                               accept = c(".h5", ".H5")),
+                     textOutput("single_cell_upload_atac_h5_status")
+              )
+            ),
+            
+            fluidRow(
+              column(width = 6,
+                     fileInput("lineage_rna_mapping_file", 
+                               "Select Lineage/Singel cell RNA barcode mapping File:",
+                               accept = c(".rds", "csv")),
+                     textOutput("lineage_upload_rna_h5_status")
+              ),
+              column(width = 6,
+                     fileInput("single_cell_ATAC__file", 
+                               "Select Lineage/Singel cell ATAC barcode mapping File:",
+                               accept = c(".rds", "csv")),
+                     textOutput("single_cell_upload_atac_h5_status")
               )
             ),
             
@@ -177,6 +222,7 @@ ui <- dashboardPage(
       # 3.2 Lineage Level Tab
       # =================================================================
       tabItem(tabName = "lineage_level",
+      
         fluidRow(
           # -- Left Control Panel --
           column(width = 3,
@@ -194,6 +240,25 @@ ui <- dashboardPage(
                 condition = "input.lineage_clustering_method == 'kmeans'",
                 textInput("lineage_kmeans_input", "K:", "e.g., 3")
               ),
+              
+              conditionalPanel(
+                condition = "input.lineage_clustering_method == 'umap'",
+                textInput("lineage_pcadims_input", "PCA Dims use:", "e.g., 1:30")
+              ),
+              conditionalPanel(
+                condition = "input.lineage_clustering_method == 'umap'",
+                textInput("lineage_svddims_input", "SVD Dims use:", "e.g., 2:30")
+              ),
+              
+              conditionalPanel(
+                condition = "input.lineage_clustering_method == 'tsne'",
+                textInput("lineage_dims_input", "PCA Dims use:", "e.g., 1:30")
+              ),
+              conditionalPanel(
+                condition = "input.lineage_clustering_method == 'tsne'",
+                textInput("lineage_dims_input", "SVD Dims use:", "e.g., 2:30")
+              ),
+              
 
               hr(),
               
@@ -271,6 +336,24 @@ ui <- dashboardPage(
               conditionalPanel(
                 condition = "input.single_clustering_method == 'kmeans'",
                 textInput("single_kmeans_input", "K:", "e.g., 3")
+              ),
+              
+              conditionalPanel(
+                condition = "input.single_clustering_method == 'umap'",
+                textInput("single_pcadims_input", "PCA Dims use:", "e.g., 1:30")
+              ),
+              conditionalPanel(
+                condition = "input.single_clustering_method == 'umap'",
+                textInput("single_svddims_input", "SVD Dims use:", "e.g., 2:30")
+              ),
+              
+              conditionalPanel(
+                condition = "input.single_clustering_method == 'tsne'",
+                textInput("single_dims_input", "PCA Dims use:", "e.g., 1:30")
+              ),
+              conditionalPanel(
+                condition = "input.single_clustering_method == 'tsne'",
+                textInput("single_dims_input", "SVD Dims use:", "e.g., 2:30")
               ),
 
               hr(),
