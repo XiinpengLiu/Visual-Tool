@@ -190,10 +190,10 @@ ui <- dashboardPage(
             width = 12,
             solidHeader = TRUE,
             status = "primary",
-            bslib::accordion(
-              open = c("scRNA-seq thresholds", "scATAC-seq thresholds"),
-              bslib::accordion_panel(
-                "scRNA-seq thresholds",
+            fluidRow(
+              column(
+                width = 6,
+                h4("scRNA-seq QC thresholds"),
                 icon = icon("dna"),
                 numericInput("rna_nfeature_min", "Minimum detected genes", value = 200, min = 0),
                 helpText("Cells below this threshold will be flagged for removal."),
@@ -205,8 +205,9 @@ ui <- dashboardPage(
                 helpText("High mitochondrial content indicates stressed or dying cells."),
                 class = "control-spacer"
               ),
-              bslib::accordion_panel(
-                "scATAC-seq thresholds",
+              column(
+                width = 6,
+                h4("scATAC-seq QC thresholds"),
                 icon = icon("chart-area"),
                 numericInput("atac_peak_fragments_min", "Minimum peak fragments", value = 1000, min = 0),
                 numericInput("atac_peak_fragments_max", "Maximum peak fragments", value = 100000, min = 1),
@@ -248,16 +249,24 @@ ui <- dashboardPage(
             width = 12,
             tabPanel("scRNA-seq QC",
                      h3("scRNA-seq Quality Control Plots"),
-                     fluidRow(box(title = "QC metrics as a violin plot", width=12, imageOutput("qc_rna_qc"))),
-                     fluidRow(box(title = "FeatureScatter", width=12, imageOutput("qc_rna_fea")))
+                     fluidRow(
+                       box(title = "QC metrics as a violin plot", width = 6, imageOutput("qc_rna_qc")),
+                       box(title = "PCA Elbow Plot", width = 6, imageOutput("qc_rna_pca_elbow"))
+                     ),
+                     fluidRow(
+                       box(title = "FeatureScatter", width = 12, imageOutput("qc_rna_fea"))
+                     )
             ),
             tabPanel("scATAC-seq QC",
                      h3("scATAC-seq Quality Control Plots"),
                      fluidRow(
-                       box(title = "DensityScatter", width=6, imageOutput("qc_atac_Density")),
-                       box(title = "FragmentHistogram", width=6, imageOutput("qc_atac_Fragment"))
+                       box(title = "DensityScatter", width = 6, imageOutput("qc_atac_Density")),
+                       box(title = "FragmentHistogram", width = 6, imageOutput("qc_atac_Fragment"))
                      ),
-                     fluidRow(box(title = "QC metrics as a violin plot", width=12, imageOutput("qc_atac_QC")))
+                     fluidRow(
+                       box(title = "QC metrics as a violin plot", width = 6, imageOutput("qc_atac_QC")),
+                       box(title = "Sequencing Depth Correlation", width = 6, imageOutput("qc_atac_depth_correlation"))
+                     )
             ),
             tabPanel("Data Integration",
                      h3("scRNA and scATAC Integration"),
