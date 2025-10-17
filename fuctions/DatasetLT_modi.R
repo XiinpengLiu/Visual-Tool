@@ -455,19 +455,56 @@ clearFilters = function() {
 
 ## ------------------------------ GETTERS --------------------------
 
-getAssay = function(name, force = FALSE) {
-  private$checkActive(name, force)
-  mat <- self$assays[[name]]
-  if (is.null(mat)) stop("Assay '", name, "' not found.")
-  mat[private$intersectSamples(mat), , drop = FALSE]
+getAssay = function(assay, level = NULL, name = NULL, force = FALSE) {
+  private$checkActive(assay, force)
+  
+  if (is.null(level) && is.null(name)) {
+    mat <- self$assays[[assay]]
+    if (is.null(mat)) stop("Assay '", assay, "' not found.")
+    return(mat[private$intersectSamples(mat), , drop = FALSE])
+  }
+  
+  if (!is.null(level) && is.null(name)) {
+    mat <- self$assays[[assay]][[level]]
+    if (is.null(mat)) stop("Level '", level, "' not found in assay '", assay, "'.")
+    return(mat[private$intersectSamples(mat), , drop = FALSE])
+  }
+
+  if (!is.null(level) && !is.null(name)) {
+    mat <- self$assays[[assay]][[level]][[name]]
+    if (is.null(mat)) stop("Name '", name, "' not found in assay '", assay, "', level '", level, "'.")
+    return(mat[private$intersectSamples(mat), , drop = FALSE])
+  }
+  
+  stop("Invalid parameter combination.")
 },
 
-getEmbedding = function(assay, name, force = FALSE) {
+getEmbedding = function(assay, level = NULL, name = NULL, force = FALSE) {
   private$checkActive(assay, force)
-  embed <- self$embeddings[[assay]][[name]]
-  if (is.null(embed))
-    stop("Embedding '", name, "' not found for assay '", assay, "'.")
-  embed[private$intersectSamples(embed), , drop = FALSE]
+  
+  # 只提供 assay: 返回 self$embeddings[[assay]] 并应用样本过滤
+  if (is.null(level) && is.null(name)) {
+    mat <- self$embeddings[[assay]]
+    if (is.null(mat)) stop("No embeddings found for assay '", assay, "'.")
+    # return(mat[private$intersectSamples(mat), , drop = FALSE])
+  }
+  
+  # 提供 assay + level: 返回 self$embeddings[[assay]][[level]] 并应用样本过滤
+  if (!is.null(level) && is.null(name)) {
+    mat <- self$embeddings[[assay]][[level]]
+    if (is.null(mat)) stop("Level '", level, "' not found in embeddings for assay '", assay, "'.")
+    # return(mat[private$intersectSamples(mat), , drop = FALSE])
+  }
+  
+  # 提供 assay + level + name: 返回具体的 embedding 矩阵并应用过滤
+  if (!is.null(level) && !is.null(name)) {
+    mat <- self$embeddings[[assay]][[level]][[name]]
+    if (is.null(mat))
+      stop("Embedding '", name, "' not found for assay '", assay, "', level '", level, "'.")
+    # return(mat[private$intersectSamples(mat), , drop = FALSE])
+  }
+  
+  stop("Invalid parameter combination.")
 },
 
 getGraph = function(assay, name, force = FALSE) {
@@ -821,6 +858,38 @@ private = list(
            paste(unique(keys[duplicated(keys)]), collapse = ", "))
   },
   
+  .collect_assay_matrices = function(obj, context) {
+    if (is.null(obj)) return(list())
+    if (is.matrix(obj)) return(list(obj))
+    if (is.data.frame(obj)) {
+      mat <- private$toNumericMatrix(
+        obj,
+        what = sprintf("assay '%s'", context)
+      )
+      return(list(mat))
+    }
+    if (is.list(obj)) {
+      mats <- unlist(
+        lapply(obj, \(x) private$.collect_assay_matrices(x, context = context)),
+        recursive = FALSE
+      )
+      return(mats)
+    }
+    if (is.atomic(obj)) return(list())
+    stop("Unsupported storage type in assay '", context, "': ",
+         paste(class(obj), collapse = "/"))
+  },
+  
+  .assay_sample_ids = function(obj, assay_name) {
+    mats <- private$.collect_assay_matrices(obj, context = assay_name)
+    if (!length(mats))
+      stop("Assay '", assay_name, "' contains no matrices with row names.")
+    samples <- Reduce(intersect, lapply(mats, rownames))
+    if (length(samples) == 0)
+      stop("Assay '", assay_name, "' has no shared sample IDs across its stored matrices.")
+    samples
+  },
+  
   .base_samples = function(ignore_active_samples = FALSE) {
     if (length(self$assays) == 0)
       stop("No assays have been added yet.")
@@ -834,7 +903,13 @@ private = list(
     if (length(assays_to_use) == 0)
       stop("No active assays are set. Call setActiveAssays() or add assays.")
     
-    base <- Reduce(intersect, lapply(assays_to_use, \(a) rownames(self$assays[[a]])))
+    base <- Reduce(
+      intersect,
+      lapply(
+        assays_to_use,
+        \(a) private$.assay_sample_ids(self$assays[[a]], assay_name = a)
+      )
+    )
     if (!ignore_active_samples && length(self$activeSamples))
       base <- intersect(base, self$activeSamples)
     base
