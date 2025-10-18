@@ -1,5 +1,10 @@
 source("https://raw.githubusercontent.com/YevhenAkimov/graphics-R/main/graphics_functions.R")
-source("E:/OneDrive - stu.ouc.edu.cn/UCPH/ProjectS2/Visual-Tool/fuctions/final/DatasetLT_modi.R")
+dslt_local_path <- file.path("fuctions", "DatasetLT_modi.R")
+if (file.exists(dslt_local_path)) {
+  source(dslt_local_path)
+} else {
+  source("https://raw.githubusercontent.com/YevhenAkimov/Visual-Tool/main/fuctions/final/DatasetLT_modi.R")
+}
 source("https://raw.githubusercontent.com/YevhenAkimov/phenomics_scripts/main/phenomics_helpers.R")
 source("https://raw.githubusercontent.com/YevhenAkimov/general_purpose_R/main/general_helpers.R")
 source("https://raw.githubusercontent.com/YevhenAkimov/graphics-R/main/colors.R")
@@ -760,82 +765,80 @@ ggscatter_single = function(coords, values, column_name,
 }
 
 
-single_plot = ggscatter_single(
-    coords = hslt$getEmbedding("cGR_smoothed", 'umap'), 
+if (FALSE) {
+  single_plot <- ggscatter_single(
+    coords = hslt$getEmbedding("cGR_smoothed", "umap"),
     values = H160[["assays"]][["RNA"]][["lineage"]][["cGR_smoothed"]],
     column_name = "adavosertib",
-    ggObj = ggplot() + coord_fixed(), 
+    ggObj = ggplot() + coord_fixed(),
     size_mult = 0.2,
-    colors = rev(c('#67001f','#b2182b',"#f4a582",'#fddbc7',"#ffffff",'#d1e5f0','#92c5de','#2166ac','#053061'))
-,
+    colors = rev(c('#67001f','#b2182b',"#f4a582",'#fddbc7',"#ffffff",'#d1e5f0','#92c5de','#2166ac','#053061')),
     gg_theme = theme_umap,
     symmQuant = 0.95,
     legend.position = "right"
-)
+  )
 
-colored_clusters = ggscatter_colored(
-  H160ex$getEmbedding("cGR_smoothed", 'umap'), 
-  as.factor(H160ex$getEmbedding("cGR_smoothed", 'louvain_clusters')),
-  ggObj = ggplot(),
-  dimnamesXYZ = c("UMAP1", "UMAP2", "Cluster"),
-  size = 0.5,
-  gg_theme = theme_umap_legend,
-  colors = c("#ebce2b", "#702c8c", "#db6917", "#96cde6", "#ba1c30", "#c0bd7f", "#7f7e80", "#5fa641", "#d485b2", "#4277b6", "#df8461", "#463397", "#e1a11a", "#91218c", "#e8e948", "#7e1510", "#92ae31", "#6f340d", "#d32b1e", "#2b3514")
-) + 
-  # 自定义图例点的大小
-  guides(color = guide_legend(override.aes = list(size = 3))) +
-  # 添加标题
-  ggtitle("Phenomics clusters") +
-  # 固定坐标轴比例
-  coord_fixed()
+  colored_clusters <- ggscatter_colored(
+    H160ex$getEmbedding("cGR_smoothed", "umap"),
+    as.factor(H160ex$getEmbedding("cGR_smoothed", "louvain_clusters")),
+    ggObj = ggplot(),
+    dimnamesXYZ = c("UMAP1", "UMAP2", "Cluster"),
+    size = 0.5,
+    gg_theme = theme_umap_legend,
+    colors = c("#ebce2b", "#702c8c", "#db6917", "#96cde6", "#ba1c30", "#c0bd7f", "#7f7e80", "#5fa641", "#d485b2", "#4277b6", "#df8461", "#463397", "#e1a11a", "#91218c", "#e8e948", "#7e1510", "#92ae31", "#6f340d", "#d32b1e", "#2b3514")
+  ) +
+    guides(color = guide_legend(override.aes = list(size = 3))) +
+    ggtitle("Phenomics clusters") +
+    coord_fixed()
 
+  summarized_clusters <- summarize_columns(
+    as.data.frame(dslt$getAssay("lineage", smoothed_name)),
+    dslt$getEmbedding(smoothed_name, "louvain_clusters")
+  )
 
-summarized_clusters=summarize_columns(as.data.frame(dslt$getAssay(smoothed_name)),dslt$getEmbedding(smoothed_name,'louvain_clusters'))
+  clusters_heat <- ggshape_heatmap(
+    summarized_clusters,
+    abs(summarized_clusters),
+    size_range = c(1, 7),
+    theme_choice = ggplot2::theme_minimal() + theme(plot.title = element_text(size = 16, hjust = 0, vjust = 1)),
+    shape_values = 21,
+    value_label = "Sensitivity",
+    size_label = "Effect size",
+    row_label = "Cluster",
+    column_label = "Treatment",
+    title = paste0(cell_line, " Cluster Analysis of cGR scores"),
+    cluster_rows = TRUE,
+    colorscheme = rev(RdBl_mod3),
+    symmQuant = 0.95,
+    grid.pars = list(
+      grid.size = 1,
+      axis.text.x = element_text(size = 8, angle = 0, hjust = -1),
+      grid.color = "#f4f4f4",
+      grid.linetype = "solid"
+    ),
+    cluster_cols = TRUE,
+    text.angle.x = 90
+  ) + coord_fixed()
 
-
-
-clusters_heat=ggshape_heatmap((summarized_clusters),abs((summarized_clusters)),size_range   = c(1, 7),
-                              # colorscheme = rev(c('#9C0824','#BF1316','#D42922','#E96251','#EBA49A','#f0f0f0','#B0B0B0','#838383','#5D5D5D', '#3B3B3B' ,'#1E1E1E')), 
-                              theme_choice    = ggplot2::theme_minimal()+theme(plot.title = element_text(size = 16, hjust = 0, 
-                                                                                                         vjust = 1 )),
-                              shape_values = 21,
-                              value_label  = "Sensitivity",
-                              size_label   = "Effect size",
-                              row_label    = "Cluster",
-                              column_label = "Treatment",
-                              title        = paste0(cell_line," Cluster Analysis of cGR scores"),
-                              cluster_rows = T,
-                              colorscheme = rev(RdBl_mod3),
-                              symmQuant = 0.95,
-                              grid.pars = list(grid.size = 1,
-                                               axis.text.x = element_text(size = 8, angle = 0, hjust = -1),
-                                               grid.color = "#f4f4f4",
-                                               grid.linetype = "solid"),
-                              cluster_cols = T,text.angle.x = 90)+coord_fixed()
-
-
-
-
-arches_heatmap =ggshape_heatmap(t(tanh(dslt$getColumnMetadata(smoothed_name,"archetypes")/3) ),
-                                data_sizes=t(abs(tanh(dslt$getColumnMetadata(smoothed_name,"archetypes")/3) )),
-                                theme_choice    = ggplot2::theme_minimal()+theme(plot.title = element_text(size = 18, hjust = 0, 
-                                                                                                           vjust = 1 )),
-                                
-                                shape_values = 21,  
-                                size_range   = c(0.5, 4),
-                                # colorscheme = rev(c('#9C0824','#BF1316','#D42922','#E96251','#EBA49A','#f0f0f0','#B0B0B0','#838383','#5D5D5D', '#3B3B3B' ,'#1E1E1E')), 
-                                value_label  = "Sensitivity",
-                                size_label   = "Effect size",
-                                row_label    = "Archetype",
-                                column_label = "Treatment",
-                                title        = paste0(cell_line," Archetypal Analysis of cGR scores"),
-                                cluster_rows = T,
-                                colorscheme = rev(RdBl_mod3),
-                                symmQuant = 0.95,
-                                grid.pars = list(grid.size = 0,
-                                                 grid.color = "#f4f4f4",
-                                                 grid.linetype = "solid"),
-                                cluster_cols = T,text.angle.x = 90)+coord_fixed()
+  arches_heatmap <- ggshape_heatmap(
+    t(tanh(dslt$getColumnMetadata(smoothed_name, "archetypes") / 3)),
+    data_sizes = t(abs(tanh(dslt$getColumnMetadata(smoothed_name, "archetypes") / 3))),
+    theme_choice = ggplot2::theme_minimal() + theme(plot.title = element_text(size = 18, hjust = 0, vjust = 1)),
+    shape_values = 21,
+    size_range = c(0.5, 4),
+    value_label = "Sensitivity",
+    size_label = "Effect size",
+    row_label = "Archetype",
+    column_label = "Treatment",
+    title = paste0(cell_line, " Archetypal Analysis of cGR scores"),
+    cluster_rows = TRUE,
+    colorscheme = rev(RdBl_mod3),
+    symmQuant = 0.95,
+    grid.pars = list(grid.size = 0, grid.color = "#f4f4f4", grid.linetype = "solid"),
+    cluster_cols = TRUE,
+    text.angle.x = 90
+  ) + coord_fixed()
+}
 
 
 

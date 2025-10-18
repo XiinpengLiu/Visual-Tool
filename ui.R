@@ -3,14 +3,13 @@ library(shinydashboard)
 library(shinyWidgets)
 library(bslib)
 
-
 # UI Definition
 ui <- dashboardPage(
   skin = "blue",
-  
+
   # 1. Dashboard Header
   dashboardHeader(title = "Multi-omic Response Explorer"),
-  
+
   # 2. Sidebar Menu
   dashboardSidebar(
     sidebarMenu(
@@ -26,12 +25,12 @@ ui <- dashboardPage(
       menuItem("File Export", tabName = "export", icon = icon("download"))
     )
   ),
-  
+
   # 3. Dashboard Body Content
   dashboardBody(
     tags$head(
-      tags$style(HTML("
-        .control-spacer {
+      tags$style(HTML(
+        "        .control-spacer {
           margin-top: 15px;
         }
 
@@ -42,7 +41,8 @@ ui <- dashboardPage(
         .export-history-table {
           margin-top: 10px;
         }
-      "))
+      "
+      ))
     ),
     tabItems(
       # =================================================================
@@ -162,11 +162,55 @@ ui <- dashboardPage(
                     helpText("Optional mapping to reconcile ATAC barcodes across assays."),
                     textOutput("single_cell_atac_mapping_status")
                   )
+                ),
+                fluidRow(
+                  column(
+                    width = 6,
+                    fileInput(
+                      "drug_matrix_file",
+                      "Optional drug-response matrix",
+                      accept = c(".rds", ".RDS", ".csv", ".tsv"),
+                      buttonLabel = "Browse"
+                    ),
+                    checkboxInput("denoise_drug_matrix", "Apply denoising to uploaded drug matrix", FALSE)
+                  ),
+                  column(
+                    width = 6,
+                    pickerInput(
+                      "dslt_denoise_assays",
+                      "Select assays to denoise",
+                      choices = NULL,
+                      multiple = TRUE,
+                      options = pickerOptions(actionsBox = TRUE, noneSelectedText = "Awaiting lineage upload")
+                    )
+                  )
                 )
               )
             ),
 
             hr(),
+
+            fluidRow(
+              column(
+                width = 4,
+                textInput("barcode_suffix", "Barcode suffix filter", value = "-1$",
+                  placeholder = "Regex suffix, e.g. -1$")
+              ),
+              column(
+                width = 4,
+                pickerInput(
+                  "denoise_assays_choice",
+                  "Denoise lineage assays",
+                  choices = NULL,
+                  multiple = TRUE,
+                  options = pickerOptions(actionsBox = TRUE, noneSelectedText = "Awaiting lineage upload")
+                )
+              ),
+              column(
+                width = 4,
+                actionButton("load_all_data", "Load selected data", class = "btn-success btn-block")
+              )
+            ),
 
             fluidRow(
               column(
@@ -178,7 +222,7 @@ ui <- dashboardPage(
           )
         )
       ),
-      
+
       # =================================================================
       # 3.1 QC Settings Tab
       # =================================================================
@@ -237,7 +281,7 @@ ui <- dashboardPage(
           )
         )
       ),
-      
+
       # =================================================================
       # 3.2 QC Tab
       # =================================================================
@@ -248,29 +292,29 @@ ui <- dashboardPage(
             id = "qc_tabset",
             width = 12,
             tabPanel("scRNA-seq QC",
-                     h3("scRNA-seq Quality Control Plots"),
-                     fluidRow(
-                       box(title = "QC metrics as a violin plot", width = 6, imageOutput("qc_rna_qc")),
-                       box(title = "PCA Elbow Plot", width = 6, imageOutput("qc_rna_pca_elbow"))
-                     ),
-                     fluidRow(
-                       box(title = "FeatureScatter", width = 12, imageOutput("qc_rna_fea"))
-                     )
+              h3("scRNA-seq Quality Control Plots"),
+              fluidRow(
+                box(title = "QC metrics as a violin plot", width = 6, plotOutput("qc_rna_qc")),
+                box(title = "PCA Elbow Plot", width = 6, plotOutput("qc_rna_pca_elbow"))
+              ),
+              fluidRow(
+                box(title = "FeatureScatter", width = 12, plotOutput("qc_rna_fea"))
+              )
             ),
             tabPanel("scATAC-seq QC",
-                     h3("scATAC-seq Quality Control Plots"),
-                     fluidRow(
-                       box(title = "DensityScatter", width = 6, imageOutput("qc_atac_Density")),
-                       box(title = "FragmentHistogram", width = 6, imageOutput("qc_atac_Fragment"))
-                     ),
-                     fluidRow(
-                       box(title = "QC metrics as a violin plot", width = 6, imageOutput("qc_atac_QC")),
-                       box(title = "Sequencing Depth Correlation", width = 6, imageOutput("qc_atac_depth_correlation"))
-                     )
+              h3("scATAC-seq Quality Control Plots"),
+              fluidRow(
+                box(title = "DensityScatter", width = 6, plotOutput("qc_atac_Density")),
+                box(title = "FragmentHistogram", width = 6, plotOutput("qc_atac_Fragment"))
+              ),
+              fluidRow(
+                box(title = "QC metrics as a violin plot", width = 6, plotOutput("qc_atac_QC")),
+                box(title = "Sequencing Depth Correlation", width = 6, plotOutput("qc_atac_depth_correlation"))
+              )
             ),
             tabPanel("Data Integration",
-                     h3("scRNA and scATAC Integration"),
-                     imageOutput("integration_plot")
+              h3("scRNA and scATAC Integration"),
+              plotOutput("integration_plot")
             )
           )
         )
@@ -280,7 +324,7 @@ ui <- dashboardPage(
       # 3.2 Lineage Level Tab
       # =================================================================
       tabItem(tabName = "lineage_level",
-      
+
         fluidRow(
           # -- Left Control Panel --
           column(width = 3,
@@ -289,16 +333,16 @@ ui <- dashboardPage(
               width = NULL,
               solidHeader = TRUE,
               status = "primary",
-              
+
               # Clustering Method Selection
               selectInput("lineage_clustering_method", "Select Clustering Method:",
-                          choices = c("UMAP" = "umap", "PCA" = "pca", "t-SNE" = "tsne", "K-Means" = "kmeans")),
-              
+                choices = c("UMAP" = "umap", "PCA" = "pca", "t-SNE" = "tsne", "K-Means" = "kmeans")),
+
               conditionalPanel(
                 condition = "input.lineage_clustering_method == 'kmeans'",
                 textInput("lineage_kmeans_input", "K:", "e.g., 3")
               ),
-              
+
               conditionalPanel(
                 condition = "input.lineage_clustering_method == 'umap'",
                 numericRangeInput("lineage_umap_pca_dims", "PCA dimensions", value = c(1, 30), min = 1, max = 50)
@@ -316,24 +360,23 @@ ui <- dashboardPage(
                 condition = "input.lineage_clustering_method == 'tsne'",
                 numericRangeInput("lineage_tsne_svd_dims", "SVD dimensions", value = c(2, 30), min = 1, max = 50)
               ),
-              
 
               hr(),
-              
+
               # UMAP Coloring Selector
               h4("UMAP Plot Coloring"),
               selectInput("lineage_color_by", "Select Coloring Variable Type:",
-                          choices = c(
-                            "Cell Clusters" = "cluster",
-                            "Drug Response" = "drug_response"
-                          )),
-              
+                choices = c(
+                  "Cell Clusters" = "cluster",
+                  "Drug Response" = "drug_response"
+                )),
+
               # -- Conditional UI: Display different options based on coloring selection --
               # Drug Response/Growth Rate Selection
               conditionalPanel(
                 condition = "input.lineage_color_by == 'drug_response'",
-              selectInput("lineage_rds_object_select", "Select dataset",
-                          choices = c("Long-term growth rate" = "cGR", "Drug resistance score" = "AUC")),
+                selectInput("lineage_rds_object_select", "Select dataset",
+                  choices = c("Long-term growth rate" = "cGR", "Drug resistance score" = "AUC")),
                 pickerInput(
                   "lineage_drug_select",
                   "Select drugs",
@@ -345,6 +388,13 @@ ui <- dashboardPage(
                     noneSelectedText = "Awaiting uploaded metadata"
                   )
                 )
+              ),
+
+              radioButtons(
+                "lineage_bubble_mode",
+                "Bubble plot mode",
+                choices = c("Cluster" = "cluster", "Archetype" = "archetype"),
+                inline = TRUE
               ),
 
               hr(),
@@ -366,32 +416,35 @@ ui <- dashboardPage(
 
             )
           ),
-          
+
           # -- Right Chart Display --
           column(width = 9,
             # -- Clustering Plots --
             fluidRow(
-              box(title = "RNA-seq Clustering", width = 6, imageOutput("lineage_rna_cluster_plot")),
-              box(title = "Cluster Density Plot", width = 6, imageOutput("lineage_density_plot"))
+              box(title = "RNA-seq Clustering", width = 6, plotOutput("lineage_rna_cluster_plot")),
+              box(title = "KNN Embedding", width = 6, plotOutput("lineage_knn_plot"))
             ),
             fluidRow(
-              box(title = "ATAC-seq Clustering", width = 6, imageOutput("lineage_atac_cluster_plot")),
-              box(title = "Drug Response Heatmap", width = 6, imageOutput("lineage_drug_response_heatmap"))
+              box(title = "ATAC-seq Clustering", width = 6, plotOutput("lineage_atac_cluster_plot")),
+              box(title = "Drug Response Embedding", width = 6, plotOutput("lineage_drug_response_plot"))
+            ),
+            fluidRow(
+              box(title = "Cluster/Archetype Bubble", width = 12, plotOutput("lineage_bubble_plot"))
             ),
 
             # -- Expression/Accessibility Analysis --
             fluidRow(
               box(title = "Combining genomic tracks", width = 12,
-                  tabBox(width = 12,
-                         tabPanel("Cross-cluster violin", imageOutput("lineage_violin_plot")),
-                         tabPanel("Coverage", imageOutput("lineage_coverage_plot"))
-                  )
+                tabBox(width = 12,
+                  tabPanel("Cross-cluster violin", plotOutput("lineage_violin_plot")),
+                  tabPanel("Coverage", plotOutput("lineage_coverage_plot"))
+                )
               )
             )
           )
         )
       ),
-      
+
       # =================================================================
       # 3.3 Single Cell Level Tab
       # =================================================================
@@ -404,16 +457,16 @@ ui <- dashboardPage(
               width = NULL,
               solidHeader = TRUE,
               status = "primary",
-              
+
               # Clustering Method Selection
               selectInput("single_clustering_method", "Select Clustering Method:",
-                          choices = c("UMAP" = "umap", "PCA" = "pca", "t-SNE" = "tsne", "K-Means" = "kmeans")),
-              
+                choices = c("UMAP" = "umap", "PCA" = "pca", "t-SNE" = "tsne", "K-Means" = "kmeans")),
+
               conditionalPanel(
                 condition = "input.single_clustering_method == 'kmeans'",
                 textInput("single_kmeans_input", "K:", "e.g., 3")
               ),
-              
+
               conditionalPanel(
                 condition = "input.single_clustering_method == 'umap'",
                 numericRangeInput("single_umap_pca_dims", "PCA dimensions", value = c(1, 30), min = 1, max = 50)
@@ -433,21 +486,21 @@ ui <- dashboardPage(
               ),
 
               hr(),
-              
+
               # UMAP Coloring Selector
               h4("UMAP Plot Coloring"),
               selectInput("single_color_by", "Select Coloring Variable Type:",
-                          choices = c(
-                            "Cell Clusters" = "cluster",
-                            "Drug Response" = "drug_response"
-                          )),
-              
+                choices = c(
+                  "Cell Clusters" = "cluster",
+                  "Drug Response" = "drug_response"
+                )),
+
               # -- Conditional UI: Display different options based on coloring selection --
               # Drug Response/Growth Rate Selection
               conditionalPanel(
                 condition = "input.single_color_by == 'drug_response'",
-              selectInput("single_rds_object_select", "Select dataset",
-                          choices = c("Long-term growth rate" = "cGR", "Drug resistance score" = "AUC")),
+                selectInput("single_rds_object_select", "Select dataset",
+                  choices = c("Long-term growth rate" = "cGR", "Drug resistance score" = "AUC")),
                 pickerInput(
                   "single_drug_select",
                   "Select drugs",
@@ -480,38 +533,37 @@ ui <- dashboardPage(
 
             )
           ),
-          
+
           # -- Right Chart Display --
           column(width = 9,
             # -- Clustering Plots --
             fluidRow(
-              box(title = "scRNA-seq Clustering", width = 6, imageOutput("single_rna_cluster_plot")),
-              box(title = "Cluster Density Plot", width = 6, imageOutput("single_density_plot"))
+              box(title = "RNA-seq Clustering", width = 6, plotOutput("single_rna_cluster_plot")),
+              box(title = "KNN Embedding", width = 6, plotOutput("single_knn_plot"))
             ),
             fluidRow(
-              box(title = "scATAC-seq Clustering", width = 6, imageOutput("single_atac_cluster_plot")),
-              box(title = "Drug Response Heatmap", width = 6, imageOutput("single_drug_response_heatmap"))
+              box(title = "ATAC-seq Clustering", width = 6, plotOutput("single_atac_cluster_plot")),
+              box(title = "Drug Response Embedding", width = 6, plotOutput("single_drug_response_plot"))
             ),
 
             # -- Expression/Accessibility Analysis --
             fluidRow(
               box(title = "Combining genomic tracks", width = 12,
-                  tabBox(width = 12,
-                         tabPanel("Coverage", imageOutput("single_coverage_plot"))
-                  )
+                tabBox(width = 12,
+                  tabPanel("Cross-cluster violin", plotOutput("single_violin_plot")),
+                  tabPanel("Coverage", plotOutput("single_coverage_plot"))
+                )
               )
             )
           )
         )
       ),
-      
+
       # =================================================================
-      # 3.4 File Export Tab
+      # 3.4 Export Tab
       # =================================================================
       tabItem(tabName = "export",
-        h2("File Export"),
         fluidRow(
-          # Data Export
           box(
             title = "Data export",
             width = 6,
@@ -563,7 +615,9 @@ ui <- dashboardPage(
             textInput("custom_plot_name", "Plot name", "custom_plot"),
             selectInput("custom_plot_type", "Available plots", choices = c(
               "RNA clustering" = "rna_cluster",
-              "Density" = "density"
+              "Drug embedding" = "drug_embedding",
+              "KNN embedding" = "knn_embedding",
+              "Bubble" = "bubble"
             )),
             selectInput("custom_plot_level", "Analysis level", choices = c("Lineage" = "lineage", "Single-cell" = "single")),
             selectInput("custom_plot_format", "Image format", choices = c("PNG" = "png", "PDF" = "pdf", "JPEG" = "jpeg")),
@@ -598,421 +652,3 @@ ui <- dashboardPage(
     )
   )
 )
-
-# Server Logic
-server <- function(input, output, session) {
-  # --- Data Storage ---
-  values <- reactiveValues(
-    lineage_data = NULL,
-    single_cell_data = NULL,
-    qc_applied = FALSE,
-    export_history = data.frame(
-      timestamp = character(),
-      action = character(),
-      stringsAsFactors = FALSE
-    )
-  )
-
-  output$lineage_upload_status <- renderText("Awaiting lineage RDS upload.")
-  output$single_cell_upload_status <- renderText("Awaiting single-cell RDS upload.")
-  output$lineage_upload_rna_h5_status <- renderText("Optional: upload lineage RNA matrix.")
-  output$single_cell_upload_rna_h5_status <- renderText("Optional: upload single-cell RNA matrix.")
-  output$lineage_upload_atac_h5_status <- renderText("Optional: upload lineage ATAC matrix.")
-  output$single_cell_upload_atac_h5_status <- renderText("Optional: upload single-cell ATAC matrix.")
-  output$lineage_rna_mapping_status <- renderText("Optional: upload RNA barcode mapping file.")
-  output$single_cell_atac_mapping_status <- renderText("Optional: upload ATAC barcode mapping file.")
-
-  # --- File Upload Processing ---
-  observeEvent(input$lineage_rds_file, {
-    req(input$lineage_rds_file)
-    tryCatch({
-      values$lineage_data <- readRDS(input$lineage_rds_file$datapath)
-      output$lineage_upload_status <- renderText("Lineage data uploaded successfully!")
-    }, error = function(e) {
-      output$lineage_upload_status <- renderText(paste("Upload failed:", e$message))
-    })
-  })
-  
-  observeEvent(input$single_cell_rds_file, {
-    req(input$single_cell_rds_file)
-    tryCatch({
-      values$single_cell_data <- readRDS(input$single_cell_rds_file$datapath)
-      output$single_cell_upload_status <- renderText("Single Cell data uploaded successfully!")
-    }, error = function(e) {
-      output$single_cell_upload_status <- renderText(paste("Upload failed:", e$message))
-    })
-  })
-
-  observeEvent(input$lineage_rna_h5_file, {
-    req(input$lineage_rna_h5_file)
-    output$lineage_upload_rna_h5_status <- renderText("Lineage RNA matrix uploaded.")
-  })
-
-  observeEvent(input$single_cell_rna_h5_file, {
-    req(input$single_cell_rna_h5_file)
-    output$single_cell_upload_rna_h5_status <- renderText("Single-cell RNA matrix uploaded.")
-  })
-
-  observeEvent(input$lineage_atac_h5_file, {
-    req(input$lineage_atac_h5_file)
-    output$lineage_upload_atac_h5_status <- renderText("Lineage ATAC matrix uploaded.")
-  })
-
-  observeEvent(input$single_cell_atac_h5_file, {
-    req(input$single_cell_atac_h5_file)
-    output$single_cell_upload_atac_h5_status <- renderText("Single-cell ATAC matrix uploaded.")
-  })
-
-  observeEvent(input$lineage_rna_mapping_file, {
-    req(input$lineage_rna_mapping_file)
-    output$lineage_rna_mapping_status <- renderText("RNA barcode mapping uploaded.")
-  })
-
-  observeEvent(input$single_cell_atac_mapping_file, {
-    req(input$single_cell_atac_mapping_file)
-    output$single_cell_atac_mapping_status <- renderText("ATAC barcode mapping uploaded.")
-  })
-
-  # --- Upload Status Summary ---
-  output$upload_summary <- renderText({
-    lineage_status <- if(is.null(values$lineage_data)) "Not uploaded" else "Uploaded"
-    single_cell_status <- if(is.null(values$single_cell_data)) "Not uploaded" else "Uploaded"
-    
-    paste("Lineage Data:", lineage_status, "\n",
-          "Single Cell Data:", single_cell_status, "\n",
-          "Status: Data", if(is.null(values$lineage_data) && is.null(values$single_cell_data)) "not ready" else "ready")
-  })
-  
-  # --- QC Settings Application ---
-  observeEvent(input$apply_qc_settings, {
-    values$qc_applied <- TRUE
-    output$qc_settings_status <- renderText("QC settings applied successfully!")
-  })
-
-  # --- QC Settings Reset ---
-  observeEvent(input$reset_qc_settings, {
-    updateNumericInput(session, "rna_nfeature_min", value = 200)
-    updateNumericInput(session, "rna_nfeature_max", value = 5000)
-    updateNumericInput(session, "rna_ncount_min", value = 500)
-    updateNumericInput(session, "rna_ncount_max", value = 30000)
-    updateNumericInput(session, "rna_percent_mt_max", value = 20)
-    updateNumericInput(session, "atac_peak_fragments_min", value = 1000)
-    updateNumericInput(session, "atac_peak_fragments_max", value = 100000)
-    updateNumericInput(session, "atac_pct_reads_peaks_min", value = 40)
-    updateNumericInput(session, "atac_blacklist_ratio_max", value = 5)
-    updateNumericInput(session, "atac_nucleosome_signal_max", value = 2)
-    updateNumericInput(session, "atac_tss_enrichment_min", value = 2)
-    output$qc_settings_status <- renderText("QC settings reset to default values!")
-  })
-  
-  # --- QC 图表 (修改为显示本地图片) ---
-  output$qc_atac_Density <- renderImage({
-    list(src = "images/qc_atac_density.png",
-         contentType = 'image/png',
-         width = 500,
-         height = 400,
-         alt = "ATAC DensityScatter")
-  }, deleteFile = FALSE)
-  
-  output$qc_atac_Fragment <- renderImage({
-    list(src = "images/qc_atac_fragment.png",
-         contentType = 'image/png',
-         width = 500,
-         height = 400,
-         alt = "Fragment Length Distribution")
-  }, deleteFile = FALSE)
-
-  output$qc_atac_QC <- renderImage({
-    list(src = "images/qc_atac_QC.png",
-         contentType = 'image/png',
-         width = 900,
-         height = 300,
-         alt = "ATAC Quality Control")
-  }, deleteFile = FALSE)
-  
-  # --- Lineage Level 图表 (修改为显示本地图片) ---
-  output$lineage_rna_cluster_plot <- renderImage({
-    list(src = "images/lineage_rna_cluster.png",
-         contentType = 'image/png',
-         width = 350,
-         height = 350,
-         alt = "Lineage RNA UMAP")
-  }, deleteFile = FALSE)
-  
-  output$lineage_atac_cluster_plot <- renderImage({
-    list(src = "images/lineage_atac_cluster.png",
-         contentType = 'image/png',
-         width = 350,
-         height = 350,
-         alt = "Lineage ATAC UMAP")
-  }, deleteFile = FALSE)
-  
-  output$lineage_density_plot <- renderImage({
-    list(src = "images/lineage_density.png",
-         contentType = 'image/png',
-         width = 350,
-         height = 350,
-         alt = "Lineage 密度图")
-  }, deleteFile = FALSE)
-  
-  output$lineage_drug_response_heatmap <- renderImage({
-    list(src = "images/lineage_drug_heatmap.png",
-         contentType = 'image/png',
-         width = 350,
-         height = 350,
-         alt = "Lineage 药物反应热图")
-  }, deleteFile = FALSE)
-  
-  output$lineage_violin_plot <- renderImage({
-    list(src = "images/lineage_violin.png",
-         contentType = 'image/png',
-         width = 600,
-         height = 350,
-         alt = "Lineage 小提琴图")
-  }, deleteFile = FALSE)
-  
-  output$lineage_coverage_plot <- renderImage({
-    list(src = "images/lineage_coverage.png",
-         contentType = 'image/png',
-         width = 600,
-         height = 300,
-         alt = "Lineage Coverage Plot")
-  }, deleteFile = FALSE)
-  
-  # --- Single Cell Level 图表 (修改为显示本地图片) ---
-  output$single_rna_cluster_plot <- renderImage({
-    list(src = "images/single_rna_cluster.png",
-         contentType = 'image/png',
-         width = 350,
-         height = 350,
-         alt = "Single Cell RNA UMAP")
-  }, deleteFile = FALSE)
-  
-  output$single_atac_cluster_plot <- renderImage({
-    list(src = "images/single_atac_cluster.png",
-         contentType = 'image/png',
-         width = 350,
-         height = 350,
-         alt = "Single Cell ATAC UMAP")
-  }, deleteFile = FALSE)
-  
-  output$single_density_plot <- renderImage({
-    list(src = "images/single_density.png",
-         contentType = 'image/png',
-         width = 350,
-         height = 350,
-         alt = "Single Cell 密度图")
-  }, deleteFile = FALSE)
-  
-  output$single_drug_response_heatmap <- renderImage({
-    list(src = "images/single_drug_heatmap.png",
-         contentType = 'image/png',
-         width = 350,
-         height = 250,
-         alt = "Single Cell 药物反应热图")
-  }, deleteFile = FALSE)
-
-  output$single_coverage_plot <- renderImage({
-    list(src = "images/single_coverage.png",
-         contentType = 'image/png',
-         width = 600,
-         height = 800,
-         alt = "Single Cell Coverage Plot")
-  }, deleteFile = FALSE)
-  
-  # --- QC 图表 (修改为显示本地图片) ---
-  output$qc_rna_qc <- renderImage({
-    list(src = "images/qc_rna_qc.png",
-         contentType = 'image/png',
-         width = 800,
-         height = 400,
-         alt = "UMI 计数")
-  }, deleteFile = FALSE)
-  
-  output$qc_rna_fea <- renderImage({
-    list(src = "images/qc_rna_features.png",
-         contentType = 'image/png',
-         width = 800,
-         height = 400,
-         alt = "基因计数")
-  }, deleteFile = FALSE)
-  
-  output$integration_plot <- renderImage({
-    list(src = "images/integration_plot.png",
-         contentType = 'image/png',
-         width = 600,
-         height = 400,
-         alt = "整合图")
-  }, deleteFile = FALSE)
-  
-  # --- 数据可用性检查 ---
-  output$lineage_data_available <- reactive({
-    !is.null(values$lineage_data)
-  })
-  
-  output$single_cell_data_available <- reactive({
-    !is.null(values$single_cell_data)
-  })
-  
-  outputOptions(output, "lineage_data_available", suspendWhenHidden = FALSE)
-  outputOptions(output, "single_cell_data_available", suspendWhenHidden = FALSE)
-  
-  # --- 数据导出处理 ---
-  output$download_lineage_data <- downloadHandler(
-    filename = function() {
-      paste("lineage_data_", Sys.Date(), ".rds", sep = "")
-    },
-    content = function(file) {
-      saveRDS(values$lineage_data, file)
-      values$export_history <- rbind(
-        values$export_history,
-        data.frame(timestamp = Sys.time(), action = "Exported lineage data", stringsAsFactors = FALSE)
-      )
-    }
-  )
-  
-  output$download_single_cell_data <- downloadHandler(
-    filename = function() {
-      paste("single_cell_data_", Sys.Date(), ".rds", sep = "")
-    },
-    content = function(file) {
-      saveRDS(values$single_cell_data, file)
-      values$export_history <- rbind(
-        values$export_history,
-        data.frame(timestamp = Sys.time(), action = "Exported single-cell data", stringsAsFactors = FALSE)
-      )
-    }
-  )
-  
-  output$download_qc_summary <- downloadHandler(
-    filename = function() {
-      paste("qc_summary_", Sys.Date(), ".csv", sep = "")
-    },
-    content = function(file) {
-      # Create mock QC summary data
-      qc_data <- data.frame(
-        Parameter = c("nFeature_RNA_min", "nFeature_RNA_max", "nCount_RNA_min", 
-                     "nCount_RNA_max", "percent.mt_max", "TSS.enrichment_min"),
-        Value = c(input$rna_nfeature_min, input$rna_nfeature_max, 
-                 input$rna_ncount_min, input$rna_ncount_max, 
-                 input$rna_percent_mt_max, input$atac_tss_enrichment_min)
-      )
-      write.csv(qc_data, file, row.names = FALSE)
-      values$export_history <- rbind(
-        values$export_history,
-        data.frame(timestamp = Sys.time(), action = "Exported QC report", stringsAsFactors = FALSE)
-      )
-    }
-  )
-  
-  output$download_cluster_results <- downloadHandler(
-    filename = function() {
-      paste("cluster_results_", Sys.Date(), ".csv", sep = "")
-    },
-    content = function(file) {
-      # Create mock clustering results
-      cluster_data <- data.frame(
-        Cell_ID = paste("Cell", 1:100, sep = "_"),
-        Cluster = sample(1:5, 100, replace = TRUE),
-        UMAP_1 = rnorm(100),
-        UMAP_2 = rnorm(100)
-      )
-      write.csv(cluster_data, file, row.names = FALSE)
-      values$export_history <- rbind(
-        values$export_history,
-        data.frame(timestamp = Sys.time(), action = "Exported clustering results", stringsAsFactors = FALSE)
-      )
-    }
-  )
-  
-  # --- 图表导出处理 ---
-  output$download_custom_plot <- downloadHandler(
-    filename = function() {
-      paste(input$custom_plot_name, "_", input$custom_plot_level, "_", 
-            Sys.Date(), ".", input$custom_plot_format, sep = "")
-    },
-    content = function(file) {
-      # 根据选择生成对应的图表
-      if(input$custom_plot_format == "png") {
-        png(file, width = 800, height = 600)
-      } else if(input$custom_plot_format == "pdf") {
-        pdf(file, width = 8, height = 6)
-      } else if(input$custom_plot_format == "jpeg") {
-        jpeg(file, width = 800, height = 600)
-      }
-      
-      # 根据图表类型和级别生成图表
-      if(input$custom_plot_type == "rna_cluster") {
-        plot(rnorm(100), rnorm(100), main = paste("RNA Cluster -", input$custom_plot_level))
-      } else if(input$custom_plot_type == "density") {
-        plot(density(rnorm(100)), main = paste("Density Plot -", input$custom_plot_level))
-      }
-      # 可以根据需要添加更多图表类型
-
-      dev.off()
-      values$export_history <- rbind(
-        values$export_history,
-        data.frame(timestamp = Sys.time(), action = paste("Exported custom plot -", input$custom_plot_name), stringsAsFactors = FALSE)
-      )
-    }
-  )
-
-  # --- 导出历史显示 ---
-  output$export_history_table <- renderTable({
-    if(nrow(values$export_history) == 0) {
-      return(data.frame(
-        timestamp = "-",
-        action = "No export records yet.",
-        stringsAsFactors = FALSE
-      ))
-    }
-
-    values$export_history[order(values$export_history$timestamp, decreasing = TRUE), ]
-  })
-
-  # --- 导出可用性信息框 ---
-  output$lineage_export_status <- renderInfoBox({
-    status <- if (is.null(values$lineage_data)) "yellow" else "green"
-    message <- if (is.null(values$lineage_data)) "Lineage data not ready" else "Lineage data ready"
-    infoBox("Lineage dataset", message, icon = icon("sitemap"), color = status)
-  })
-
-  output$single_export_status <- renderInfoBox({
-    status <- if (is.null(values$single_cell_data)) "yellow" else "green"
-    message <- if (is.null(values$single_cell_data)) "Single-cell data not ready" else "Single-cell data ready"
-    infoBox("Single-cell dataset", message, icon = icon("braille"), color = status)
-  })
-
-  output$qc_settings_info <- renderInfoBox({
-    status <- if (values$qc_applied) "green" else "yellow"
-    message <- if (values$qc_applied) "QC thresholds applied" else "Apply QC settings to enable exports"
-    infoBox("QC settings", message, icon = icon("cog"), color = status)
-  })
-
-  output$custom_export_info <- renderInfoBox({
-    available <- nrow(values$export_history) > 0
-    status <- if (available) "blue" else "yellow"
-    message <- if (available) "Recent exports listed below" else "No export actions yet"
-    infoBox("Export log", message, icon = icon("clipboard-list"), color = status)
-  })
-
-  # --- 清除导出历史 ---
-  observeEvent(input$clear_export_history, {
-    showModal(modalDialog(
-      title = "Clear export history",
-      "This will remove all previous export entries. Continue?",
-      footer = tagList(
-        modalButton("Cancel"),
-        actionButton("confirm_clear_history", "Clear history", class = "btn-danger")
-      )
-    ))
-  })
-
-  observeEvent(input$confirm_clear_history, {
-    values$export_history <- values$export_history[0, ]
-    removeModal()
-  })
-}
-
-# 运行App
-shinyApp(ui, server)
