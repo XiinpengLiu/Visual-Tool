@@ -1,3 +1,9 @@
+source("https://raw.githubusercontent.com/YevhenAkimov/graphics-R/main/graphics_functions.R")
+source("E:/OneDrive - stu.ouc.edu.cn/UCPH/ProjectS2/Visual-Tool/fuctions/final/DatasetLT_modi.R")
+source("https://raw.githubusercontent.com/YevhenAkimov/phenomics_scripts/main/phenomics_helpers.R")
+source("https://raw.githubusercontent.com/YevhenAkimov/general_purpose_R/main/general_helpers.R")
+source("https://raw.githubusercontent.com/YevhenAkimov/graphics-R/main/colors.R")
+
 #------------------------------------------------seurat object
 # ATAC-seq
 #' 创建ATAC-seq Seurat对象
@@ -782,6 +788,57 @@ colored_clusters = ggscatter_colored(
   ggtitle("Phenomics clusters") +
   # 固定坐标轴比例
   coord_fixed()
+
+
+summarized_clusters=summarize_columns(as.data.frame(dslt$getAssay(smoothed_name)),dslt$getEmbedding(smoothed_name,'louvain_clusters'))
+
+
+
+clusters_heat=ggshape_heatmap((summarized_clusters),abs((summarized_clusters)),size_range   = c(1, 7),
+                              # colorscheme = rev(c('#9C0824','#BF1316','#D42922','#E96251','#EBA49A','#f0f0f0','#B0B0B0','#838383','#5D5D5D', '#3B3B3B' ,'#1E1E1E')), 
+                              theme_choice    = ggplot2::theme_minimal()+theme(plot.title = element_text(size = 16, hjust = 0, 
+                                                                                                         vjust = 1 )),
+                              shape_values = 21,
+                              value_label  = "Sensitivity",
+                              size_label   = "Effect size",
+                              row_label    = "Cluster",
+                              column_label = "Treatment",
+                              title        = paste0(cell_line," Cluster Analysis of cGR scores"),
+                              cluster_rows = T,
+                              colorscheme = rev(RdBl_mod3),
+                              symmQuant = 0.95,
+                              grid.pars = list(grid.size = 1,
+                                               axis.text.x = element_text(size = 8, angle = 0, hjust = -1),
+                                               grid.color = "#f4f4f4",
+                                               grid.linetype = "solid"),
+                              cluster_cols = T,text.angle.x = 90)+coord_fixed()
+
+
+
+
+arches_heatmap =ggshape_heatmap(t(tanh(dslt$getColumnMetadata(smoothed_name,"archetypes")/3) ),
+                                data_sizes=t(abs(tanh(dslt$getColumnMetadata(smoothed_name,"archetypes")/3) )),
+                                theme_choice    = ggplot2::theme_minimal()+theme(plot.title = element_text(size = 18, hjust = 0, 
+                                                                                                           vjust = 1 )),
+                                
+                                shape_values = 21,  
+                                size_range   = c(0.5, 4),
+                                # colorscheme = rev(c('#9C0824','#BF1316','#D42922','#E96251','#EBA49A','#f0f0f0','#B0B0B0','#838383','#5D5D5D', '#3B3B3B' ,'#1E1E1E')), 
+                                value_label  = "Sensitivity",
+                                size_label   = "Effect size",
+                                row_label    = "Archetype",
+                                column_label = "Treatment",
+                                title        = paste0(cell_line," Archetypal Analysis of cGR scores"),
+                                cluster_rows = T,
+                                colorscheme = rev(RdBl_mod3),
+                                symmQuant = 0.95,
+                                grid.pars = list(grid.size = 0,
+                                                 grid.color = "#f4f4f4",
+                                                 grid.linetype = "solid"),
+                                cluster_cols = T,text.angle.x = 90)+coord_fixed()
+
+
+
 
 
 plot_multi_violin_and_feature <- function(
