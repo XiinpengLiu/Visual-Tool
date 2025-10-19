@@ -120,7 +120,7 @@ ui <- dashboardPage(
                       accept = c(".csv", ".tsv", ".txt"),
                       buttonLabel = "Browse"
                     ),
-                    helpText("Provide the metadata file matching the ATAC matrix barcodes."),
+                    helpText("Optional: provide a metadata file matching the ATAC matrix barcodes."),
                     textOutput("single_cell_atac_metadata_status")
                   )
                 ),
@@ -168,7 +168,6 @@ ui <- dashboardPage(
                       accept = c(".rds", ".RDS", ".csv", ".tsv"),
                       buttonLabel = "Browse"
                     ),
-                    checkboxInput("denoise_drug_matrix", "Apply denoising to uploaded drug matrix", FALSE)
                   )
                 )
               )

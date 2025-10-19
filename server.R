@@ -352,9 +352,13 @@ server <- function(input, output, session) {
   # Initial upload status messages ---------------------------------------
   # -----------------------------------------------------------------------
   output$lineage_upload_status <- renderText("Awaiting lineage RDS upload.")
+  has_uploaded_files <- function(info) {
+    !is.null(info) && nrow(info) > 0
+  }
+
   output$single_cell_upload_status <- renderText({
-    rna_ready <- !is.null(input$single_cell_rna_matrix_files) && nrow(input$single_cell_rna_matrix_files) >= 3
-    atac_ready <- !is.null(input$single_cell_atac_matrix_files) && nrow(input$single_cell_atac_matrix_files) >= 3
+    rna_ready <- has_uploaded_files(input$single_cell_rna_matrix_files)
+    atac_ready <- has_uploaded_files(input$single_cell_atac_matrix_files)
     if (rna_ready && atac_ready) {
       "Single-cell RNA and ATAC matrices detected."
     } else if (rna_ready) {
@@ -366,28 +370,28 @@ server <- function(input, output, session) {
     }
   })
   output$single_cell_upload_rna_matrix_status <- renderText({
-    if (!is.null(input$single_cell_rna_matrix_files) && nrow(input$single_cell_rna_matrix_files) >= 3) {
+    if (has_uploaded_files(input$single_cell_rna_matrix_files)) {
       "Single-cell RNA matrix files uploaded."
     } else {
       "Awaiting RNA matrix files (matrix.mtx, features.tsv, barcodes.tsv)."
     }
   })
   output$single_cell_upload_atac_matrix_status <- renderText({
-    if (!is.null(input$single_cell_atac_matrix_files) && nrow(input$single_cell_atac_matrix_files) >= 3) {
+    if (has_uploaded_files(input$single_cell_atac_matrix_files)) {
       "Single-cell ATAC matrix files uploaded."
     } else {
       "Awaiting ATAC matrix files (matrix.mtx, peaks.tsv, barcodes.tsv)."
     }
   })
   output$single_cell_atac_metadata_status <- renderText({
-    if (!is.null(input$single_cell_atac_metadata_file)) {
+    if (has_uploaded_files(input$single_cell_atac_metadata_file)) {
       "ATAC metadata file uploaded."
     } else {
-      "Awaiting ATAC metadata file."
+      "Optional: upload ATAC metadata file to add cell annotations."
     }
   })
   output$single_cell_atac_fragments_status <- renderText({
-    if (!is.null(input$single_cell_atac_fragments_file)) {
+    if (has_uploaded_files(input$single_cell_atac_fragments_file)) {
       "ATAC fragments file uploaded."
     } else {
       "Awaiting ATAC fragments file."
@@ -417,131 +421,196 @@ server <- function(input, output, session) {
   observeEvent(input$load_all_data, {
     req(input$lineage_rds_file)
 
-    tryCatch({
-      # Reset derived state
-      state$qc_applied <- FALSE
-      state$seurat <- modifyList(state$seurat, list(
-        sc_rna = NULL,
-        sc_atac = NULL,
-        pb_rna = NULL,
-        pb_atac = NULL
-      ))
-      state$qc <- modifyList(state$qc, list(
-        rna_violin = NULL,
-        rna_scatter = NULL,
-        rna_elbow = NULL,
-        atac_density = NULL,
-        atac_fragment = NULL,
-        atac_violin = NULL,
-        atac_depth = NULL,
-        integration = NULL
-      ))
+    withProgress(message = "Loading data...", value = 0, {
+      tryCatch({
+        incProgress(0.1, detail = "Resetting state")
+        # Reset derived state
+        state$qc_applied <- FALSE
+        state$seurat <- modifyList(state$seurat, list(
+          sc_rna = NULL,
+          sc_atac = NULL,
+          pb_rna = NULL,
+          pb_atac = NULL
+        ))
+        state$qc <- modifyList(state$qc, list(
+          rna_violin = NULL,
+          rna_scatter = NULL,
+          rna_elbow = NULL,
+          atac_density = NULL,
+          atac_fragment = NULL,
+          atac_violin = NULL,
+          atac_depth = NULL,
+          integration = NULL
+        ))
+        state$drug_matrix <- NULL
 
-      # Load dslt from LMM output ---------------------------------------
-      state$dslt <- initializeDsltFromLmm(input$lineage_rds_file$datapath)
+        incProgress(0.2, detail = "Loading lineage data")
+        # Load dslt from LMM output ---------------------------------------
+        state$dslt <- initializeDsltFromLmm(input$lineage_rds_file$datapath)
 
-      lineage_assays <- names(state$dslt[["assays"]][["lineage"]])
-      updatePickerInput(session, "denoise_assays_choice", choices = lineage_assays)
+        lineage_assays <- names(state$dslt[["assays"]][["lineage"]])
+        updatePickerInput(session, "denoise_assays_choice", choices = lineage_assays)
 
-      state$lineage_drug_values <- state$dslt[["assays"]][["lineage"]]
-      state$single_drug_values <- state$dslt[["assays"]][["single_cell"]]
-
-      drug_choices <- extract_drug_choices(state$lineage_drug_values)
-      updatePickerInput(session, "lineage_drug_select", choices = drug_choices)
-      updatePickerInput(session, "single_drug_select", choices = drug_choices)
-
-      # Optional RNA matrices ------------------------------------------
-      if (!is.null(input$single_cell_rna_matrix_files) && nrow(input$single_cell_rna_matrix_files) > 0) {
-        rna_counts <- read_10x_from_upload(input$single_cell_rna_matrix_files)
-        if (!is.null(rna_counts)) {
-          sc_rna <- create_rna_seurat(matrix_data = rna_counts)
-          state$seurat$sc_rna_raw <- sc_rna
-        }
-      }
-
-      # Optional ATAC matrices -----------------------------------------
-      atac_matrix_provided <- !is.null(input$single_cell_atac_matrix_files) && nrow(input$single_cell_atac_matrix_files) > 0
-      atac_metadata_provided <- !is.null(input$single_cell_atac_metadata_file)
-      atac_fragments_provided <- !is.null(input$single_cell_atac_fragments_file)
-      if (atac_matrix_provided || atac_metadata_provided || atac_fragments_provided) {
-        if (!(atac_matrix_provided && atac_metadata_provided && atac_fragments_provided)) {
-          stop("Please upload ATAC matrix files, metadata, and fragments together.")
-        }
-        atac_counts <- read_10x_from_upload(input$single_cell_atac_matrix_files)
-        metadata_path <- preserve_uploaded_file(input$single_cell_atac_metadata_file)
-        fragments_path <- preserve_uploaded_file(input$single_cell_atac_fragments_file)
-        sc_atac <- create_atac_seurat(
-          counts_data = atac_counts,
-          metadata_file = metadata_path,
-          fragments_file = fragments_path
-        )
-        state$seurat$sc_atac_raw <- sc_atac
-      }
-
-      # Mapping files ---------------------------------------------------
-      if (!is.null(input$lineage_rna_mapping_file)) {
-        state$mapping$rna <- read_mapping_file(input$lineage_rna_mapping_file$datapath)
-      }
-      if (!is.null(input$single_cell_atac_mapping_file)) {
-        state$mapping$atac <- read_mapping_file(input$single_cell_atac_mapping_file$datapath)
-      }
-
-      # Additional drug matrix ----------------------------------------
-      if (!is.null(input$drug_matrix_file)) {
-        state$drug_matrix <- normalize_matrix(read_table_like(input$drug_matrix_file$datapath))
-        state$dslt[["assays"]][["lineage"]][["external_drug"]] <- state$drug_matrix
         state$lineage_drug_values <- state$dslt[["assays"]][["lineage"]]
-      }
+        state$single_drug_values <- state$dslt[["assays"]][["single_cell"]]
 
-      # Apply denoising if requested -----------------------------------
-      selected_assays <- input$denoise_assays_choice
-      if (is.null(selected_assays)) {
-        selected_assays <- character()
-      }
-      selected_assays <- intersect(selected_assays, names(state$dslt[["assays"]][["lineage"]]))
-      denoised_names <- character()
-      for (assay in selected_assays) {
-        res <- applyAdaptiveKernelDenoising(state$dslt, assay)
-        state$dslt <- res$dslt
-        denoised_names <- c(denoised_names, res$smoothed_assay_name)
-      }
-      if (!is.null(state$drug_matrix) && isTRUE(input$denoise_drug_matrix)) {
-        res <- applyAdaptiveKernelDenoising(state$dslt, "external_drug")
-        state$dslt <- res$dslt
-        denoised_names <- c(denoised_names, res$smoothed_assay_name)
-      }
-      state$denoised_assays <- denoised_names
+        drug_choices <- extract_drug_choices(state$lineage_drug_values)
+        updatePickerInput(session, "lineage_drug_select", choices = drug_choices)
+        updatePickerInput(session, "single_drug_select", choices = drug_choices)
 
-      # Update drug choices after denoising -----------------------------
-      state$lineage_drug_values <- state$dslt[["assays"]][["lineage"]]
-      state$single_drug_values <- state$dslt[["assays"]][["single_cell"]]
-      drug_choices <- extract_drug_choices(state$lineage_drug_values)
-      updatePickerInput(session, "lineage_drug_select", choices = drug_choices)
-      updatePickerInput(session, "single_drug_select", choices = drug_choices)
-      dataset_choices <- names(state$lineage_drug_values)
-      if (length(dataset_choices)) {
-        updateSelectInput(session, "lineage_rds_object_select", choices = dataset_choices, selected = dataset_choices[1])
-      }
-      single_dataset_choices <- names(state$single_drug_values)
-      if (length(single_dataset_choices)) {
-        updateSelectInput(session, "single_rds_object_select", choices = single_dataset_choices, selected = single_dataset_choices[1])
-      }
+        incProgress(0.2, detail = "Processing single-cell uploads")
+        # Optional RNA matrices ------------------------------------------
+        if (!is.null(input$single_cell_rna_matrix_files) && nrow(input$single_cell_rna_matrix_files) > 0) {
+          rna_counts <- read_10x_from_upload(input$single_cell_rna_matrix_files)
+          if (!is.null(rna_counts)) {
+            sc_rna <- create_rna_seurat(matrix_data = rna_counts)
+            state$seurat$sc_rna_raw <- sc_rna
+          }
+        }
 
-      output$upload_summary <- renderText({
-        lineage_status <- if (is.null(state$dslt)) "Not loaded" else "Loaded"
-        single_cell_rna_status <- if (is.null(state$seurat$sc_rna_raw)) "Not uploaded" else "Uploaded"
-        single_cell_atac_status <- if (is.null(state$seurat$sc_atac_raw)) "Not uploaded" else "Uploaded"
-        mapping_status <- if (is.null(state$mapping$rna) && is.null(state$mapping$atac)) "Not provided" else "Provided"
-        paste(
-          "Lineage data:", lineage_status,
-          "\nSingle-cell RNA:", single_cell_rna_status,
-          "\nSingle-cell ATAC:", single_cell_atac_status,
-          "\nMapping:", mapping_status,
-          "\nDenoised assays:", ifelse(length(state$denoised_assays), paste(state$denoised_assays, collapse = ", "), "None")
-        )
+        # Optional ATAC matrices -----------------------------------------
+        atac_matrix_provided <- has_uploaded_files(input$single_cell_atac_matrix_files)
+        atac_metadata_provided <- has_uploaded_files(input$single_cell_atac_metadata_file)
+        atac_fragments_provided <- has_uploaded_files(input$single_cell_atac_fragments_file)
+        if (atac_matrix_provided || atac_metadata_provided || atac_fragments_provided) {
+          if (!(atac_matrix_provided && atac_fragments_provided)) {
+            showNotification("Upload ATAC matrix files together with a fragments file to enable ATAC processing.", type = "error")
+          } else {
+            atac_counts <- read_10x_from_upload(input$single_cell_atac_matrix_files)
+            fragments_path <- preserve_uploaded_file(input$single_cell_atac_fragments_file)
+
+            atac_metadata <- NULL
+            if (atac_metadata_provided) {
+              metadata_path <- preserve_uploaded_file(input$single_cell_atac_metadata_file)
+              atac_metadata <- tryCatch(
+                read_table_like(metadata_path),
+                error = function(e) {
+                  showNotification("Failed to read ATAC metadata file; metadata ignored.", type = "error")
+                  NULL
+                }
+              )
+              if (!is.null(atac_metadata)) {
+                atac_metadata <- as.data.frame(atac_metadata)
+              }
+            }
+
+            sc_atac <- create_atac_seurat(
+              counts_data = atac_counts,
+              fragments_file = fragments_path
+            )
+
+            if (!is.null(atac_metadata)) {
+              metadata_df <- atac_metadata
+              barcode_values <- NULL
+              if (!is.null(rownames(metadata_df)) && any(nzchar(rownames(metadata_df)))) {
+                barcode_values <- rownames(metadata_df)
+              }
+              if (is.null(barcode_values)) {
+                lower_names <- tolower(names(metadata_df))
+                candidates <- c("barcode", "barcodes", "cell_barcode", "cellid", "cell_id", "cell")
+                idx <- which(lower_names %in% candidates)
+                if (length(idx)) {
+                  barcode_values <- as.character(metadata_df[[idx[1]]])
+                }
+              }
+              if (!is.null(barcode_values)) {
+                rownames(metadata_df) <- barcode_values
+                metadata_df <- metadata_df[!duplicated(rownames(metadata_df)), , drop = FALSE]
+                match_idx <- match(colnames(sc_atac), rownames(metadata_df))
+                valid <- !is.na(match_idx)
+                if (any(valid)) {
+                  matched_metadata <- metadata_df[match_idx[valid], , drop = FALSE]
+                  if (ncol(matched_metadata) > 0) {
+                    template <- lapply(seq_len(ncol(matched_metadata)), function(i) rep(NA, length(valid)))
+                    template <- as.data.frame(template, stringsAsFactors = FALSE)
+                    colnames(template) <- colnames(matched_metadata)
+                    rownames(template) <- colnames(sc_atac)
+                    template[valid, ] <- matched_metadata
+                    sc_atac <- AddMetaData(sc_atac, metadata = template)
+                  }
+                } else {
+                  showNotification("Uploaded ATAC metadata did not match matrix barcodes and was ignored.", type = "warning")
+                }
+              } else {
+                showNotification("Unable to determine barcode identifiers in ATAC metadata; metadata ignored.", type = "warning")
+              }
+            }
+
+            state$seurat$sc_atac_raw <- sc_atac
+          }
+        }
+
+        incProgress(0.1, detail = "Reading mapping files")
+        # Mapping files ---------------------------------------------------
+        if (!is.null(input$lineage_rna_mapping_file)) {
+          state$mapping$rna <- read_mapping_file(input$lineage_rna_mapping_file$datapath)
+        }
+        if (!is.null(input$single_cell_atac_mapping_file)) {
+          state$mapping$atac <- read_mapping_file(input$single_cell_atac_mapping_file$datapath)
+        }
+
+        incProgress(0.15, detail = "Integrating drug matrices")
+        # Additional drug matrix ----------------------------------------
+        if (!is.null(input$drug_matrix_file)) {
+          state$drug_matrix <- normalize_matrix(read_table_like(input$drug_matrix_file$datapath))
+          state$dslt[["assays"]][["lineage"]][["external_drug"]] <- state$drug_matrix
+          state$lineage_drug_values <- state$dslt[["assays"]][["lineage"]]
+        }
+
+        incProgress(0.15, detail = "Applying denoising")
+        # Apply denoising if requested -----------------------------------
+        selected_assays <- input$denoise_assays_choice
+        if (is.null(selected_assays)) {
+          selected_assays <- character()
+        }
+        selected_assays <- intersect(selected_assays, names(state$dslt[["assays"]][["lineage"]]))
+        denoise_requested <- length(selected_assays) > 0
+        denoised_names <- character()
+        for (assay in selected_assays) {
+          res <- applyAdaptiveKernelDenoising(state$dslt, assay)
+          state$dslt <- res$dslt
+          denoised_names <- c(denoised_names, res$smoothed_assay_name)
+        }
+        if (denoise_requested && !is.null(state$drug_matrix)) {
+          res <- applyAdaptiveKernelDenoising(state$dslt, "external_drug")
+          state$dslt <- res$dslt
+          denoised_names <- c(denoised_names, res$smoothed_assay_name)
+        }
+        state$denoised_assays <- denoised_names
+
+        incProgress(0.1, detail = "Updating selections")
+        # Update drug choices after denoising -----------------------------
+        state$lineage_drug_values <- state$dslt[["assays"]][["lineage"]]
+        state$single_drug_values <- state$dslt[["assays"]][["single_cell"]]
+        drug_choices <- extract_drug_choices(state$lineage_drug_values)
+        updatePickerInput(session, "lineage_drug_select", choices = drug_choices)
+        updatePickerInput(session, "single_drug_select", choices = drug_choices)
+        dataset_choices <- names(state$lineage_drug_values)
+        if (length(dataset_choices)) {
+          updateSelectInput(session, "lineage_rds_object_select", choices = dataset_choices, selected = dataset_choices[1])
+        }
+        single_dataset_choices <- names(state$single_drug_values)
+        if (length(single_dataset_choices)) {
+          updateSelectInput(session, "single_rds_object_select", choices = single_dataset_choices, selected = single_dataset_choices[1])
+        }
+
+        incProgress(0.1, detail = "Summarizing uploads")
+        output$upload_summary <- renderText({
+          lineage_status <- if (is.null(state$dslt)) "Not loaded" else "Loaded"
+          single_cell_rna_status <- if (is.null(state$seurat$sc_rna_raw)) "Not uploaded" else "Uploaded"
+          single_cell_atac_status <- if (is.null(state$seurat$sc_atac_raw)) "Not uploaded" else "Uploaded"
+          mapping_status <- if (is.null(state$mapping$rna) && is.null(state$mapping$atac)) "Not provided" else "Provided"
+          paste(
+            "Lineage data:", lineage_status,
+            "\nSingle-cell RNA:", single_cell_rna_status,
+            "\nSingle-cell ATAC:", single_cell_atac_status,
+            "\nMapping:", mapping_status,
+            "\nDenoised assays:", ifelse(length(state$denoised_assays), paste(state$denoised_assays, collapse = ", "), "None")
+          )
+        })
+      }, error = function(e) {
+        showNotification(paste("Failed to load data:", e$message), type = "error")
       })
-    }, error = function(e) {
-      showNotification(paste("Failed to load data:", e$message), type = "error")
     })
   })
 

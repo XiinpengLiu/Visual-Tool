@@ -1,10 +1,10 @@
 source("https://raw.githubusercontent.com/YevhenAkimov/graphics-R/main/graphics_functions.R")
-# dslt_local_path <- file.path("fuctions", "DatasetLT_modi.R")
-# if (file.exists(dslt_local_path)) {
-#   source(dslt_local_path)
-# } else {
-#   source("https://raw.githubusercontent.com/YevhenAkimov/Visual-Tool/main/fuctions/final/DatasetLT_modi.R")
-# }
+dslt_local_path <- file.path("fuctions", "DatasetLT_modi.R")
+if (file.exists(dslt_local_path)) {
+  source(dslt_local_path)
+} else {
+  source("https://raw.githubusercontent.com/YevhenAkimov/Visual-Tool/main/fuctions/final/DatasetLT_modi.R")
+}
 source("https://raw.githubusercontent.com/YevhenAkimov/phenomics_scripts/main/phenomics_helpers.R")
 source("https://raw.githubusercontent.com/YevhenAkimov/general_purpose_R/main/general_helpers.R")
 source("https://raw.githubusercontent.com/YevhenAkimov/graphics-R/main/colors.R")
@@ -16,7 +16,6 @@ options(shiny.maxRequestSize = 10240 * 1024^2) # 1000 MB
 #' 创建ATAC-seq Seurat对象
 #' 
 #' @param h5_file 10X h5文件路径
-#' @param metadata_file 元数据CSV文件路径
 #' @param fragments_file fragments文件路径
 #' @param genome 基因组版本，默认"hg38"
 #' @param min_cells 最少细胞数，默认10
