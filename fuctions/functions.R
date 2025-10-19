@@ -1,10 +1,10 @@
 source("https://raw.githubusercontent.com/YevhenAkimov/graphics-R/main/graphics_functions.R")
-dslt_local_path <- file.path("fuctions", "DatasetLT_modi.R")
-if (file.exists(dslt_local_path)) {
-  source(dslt_local_path)
-} else {
-  source("https://raw.githubusercontent.com/YevhenAkimov/Visual-Tool/main/fuctions/final/DatasetLT_modi.R")
-}
+# dslt_local_path <- file.path("fuctions", "DatasetLT_modi.R")
+# if (file.exists(dslt_local_path)) {
+#   source(dslt_local_path)
+# } else {
+#   source("https://raw.githubusercontent.com/YevhenAkimov/Visual-Tool/main/fuctions/final/DatasetLT_modi.R")
+# }
 source("https://raw.githubusercontent.com/YevhenAkimov/phenomics_scripts/main/phenomics_helpers.R")
 source("https://raw.githubusercontent.com/YevhenAkimov/general_purpose_R/main/general_helpers.R")
 source("https://raw.githubusercontent.com/YevhenAkimov/graphics-R/main/colors.R")
@@ -24,44 +24,16 @@ options(shiny.maxRequestSize = 10240 * 1024^2) # 1000 MB
 #' @return Seurat对象，包含ATAC-seq数据和注释信息
 create_atac_seurat <- function(h5_file = NULL,
                                 counts_data = NULL,
-                                metadata_file,
                                 fragments_file,
                                 genome = "hg38",
                                 min_cells = 10,
                                 min_features = 200) {
 
   if (!is.null(counts_data)) {
-    counts <- counts_data
+    counts_mat <- counts_data
   } else {
     stopifnot(!is.null(h5_file))
-    counts <- Read10X_h5(filename = h5_file)
-  }
-
-  # 读取元数据
-  metadata_ext <- tolower(tools::file_ext(metadata_file))
-  metadata <- if (metadata_ext %in% c("tsv", "txt")) {
-    read.delim(
-      file = metadata_file,
-      header = TRUE,
-      row.names = 1,
-      check.names = FALSE
-    )
-  } else {
-    read.csv(
-      file = metadata_file,
-      header = TRUE,
-      row.names = 1,
-      check.names = FALSE
-    )
-  }
-  
-  # 创建染色质测序对象
-  counts_mat <- if (is.list(counts)) {
-    idx <- grep("Peaks|ATAC|chromatin|acc", names(counts), ignore.case = TRUE)
-    nm <- if (length(idx)) names(counts)[idx[1]] else names(counts)[1]
-    counts[[nm]]
-  } else {
-    counts
+    counts_mat <- Read10X_h5(filename = h5_file)
   }
 
   chrom_assay <- CreateChromatinAssay(
@@ -76,8 +48,7 @@ create_atac_seurat <- function(h5_file = NULL,
   # 创建Seurat对象
   seurat_obj <- CreateSeuratObject(
     counts = chrom_assay,
-    assay = "peaks",
-    meta.data = metadata
+    assay = "peaks"
   )
   
   # 添加基因注释信息

@@ -13,6 +13,7 @@ library(readr)
 library(stringr)
 library(ggplot2)
 library(glue)
+library(EnsDb.Hsapiens.v86)
 
 source("fuctions/functions.R")
 
@@ -98,7 +99,7 @@ validate_10x_components <- function(file_names) {
     any(grepl(pattern, lower))
   }, logical(1))
   if (!all(checks[c("matrix", "mtx", "barcodes", "features")])) {
-    stop("Please upload matrix.mtx(.gz), features/peaks.tsv(.gz), and barcodes.tsv(.gz) files.")
+    stop("Please upload matrix.mtx(.gz), features/peaks.tsv(.gz), and barcodes.tsv(.gz) files, or provide a single 10x HDF5 (.h5/.hdf5) file.")
   }
   invisible(TRUE)
 }
@@ -118,6 +119,20 @@ copy_upload_to_temp_dir <- function(file_info) {
 }
 
 read_10x_from_upload <- function(file_info) {
+  if (is.null(file_info) || nrow(file_info) == 0) {
+    return(NULL)
+  }
+
+  lower_names <- tolower(file_info$name)
+  if (nrow(file_info) == 1 && grepl("\\.(h5|hdf5)$", lower_names)) {
+    temp_dir <- tempfile("tenx_h5_")
+    dir.create(temp_dir)
+    dest <- file.path(temp_dir, basename(file_info$name[1]))
+    file.copy(file_info$datapath[1], dest, overwrite = TRUE)
+    on.exit(unlink(temp_dir, recursive = TRUE), add = TRUE)
+    return(Read10X_h5(dest))
+  }
+
   temp_dir <- copy_upload_to_temp_dir(file_info)
   if (is.null(temp_dir)) {
     return(NULL)
@@ -426,7 +441,6 @@ server <- function(input, output, session) {
       state$dslt <- initializeDsltFromLmm(input$lineage_rds_file$datapath)
 
       lineage_assays <- names(state$dslt[["assays"]][["lineage"]])
-      updatePickerInput(session, "dslt_denoise_assays", choices = lineage_assays)
       updatePickerInput(session, "denoise_assays_choice", choices = lineage_assays)
 
       state$lineage_drug_values <- state$dslt[["assays"]][["lineage"]]
@@ -480,7 +494,10 @@ server <- function(input, output, session) {
       }
 
       # Apply denoising if requested -----------------------------------
-      selected_assays <- unique(c(input$denoise_assays_choice, input$dslt_denoise_assays))
+      selected_assays <- input$denoise_assays_choice
+      if (is.null(selected_assays)) {
+        selected_assays <- character()
+      }
       selected_assays <- intersect(selected_assays, names(state$dslt[["assays"]][["lineage"]]))
       denoised_names <- character()
       for (assay in selected_assays) {

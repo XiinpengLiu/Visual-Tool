@@ -91,11 +91,11 @@ ui <- dashboardPage(
                     fileInput(
                       "single_cell_rna_matrix_files",
                       "Select single-cell RNA matrix files",
-                      accept = c(".mtx", ".mtx.gz", ".tsv", ".tsv.gz"),
+                      accept = c(".mtx", ".mtx.gz", ".tsv", ".tsv.gz", ".h5", ".hdf5"),
                       multiple = TRUE,
                       buttonLabel = "Browse"
                     ),
-                    helpText("Upload the matrix.mtx(.gz), features.tsv(.gz), and barcodes.tsv(.gz) files."),
+                    helpText("Upload the matrix.mtx(.gz), features.tsv(.gz), and barcodes.tsv(.gz) files, or a single 10x HDF5 (.h5/.hdf5) file."),
                     textOutput("single_cell_upload_rna_matrix_status")
                   )
                 ),
@@ -105,11 +105,11 @@ ui <- dashboardPage(
                     fileInput(
                       "single_cell_atac_matrix_files",
                       "Select single-cell ATAC matrix files",
-                      accept = c(".mtx", ".mtx.gz", ".tsv", ".tsv.gz", ".bed", ".bed.gz"),
+                      accept = c(".mtx", ".mtx.gz", ".tsv", ".tsv.gz", ".bed", ".bed.gz", ".h5", ".hdf5"),
                       multiple = TRUE,
                       buttonLabel = "Browse"
                     ),
-                    helpText("Upload the matrix.mtx(.gz), peaks/features.tsv(.gz), and barcodes.tsv(.gz) files."),
+                    helpText("Upload the matrix.mtx(.gz), peaks/features.tsv(.gz), and barcodes.tsv(.gz) files, or a single 10x HDF5 (.h5/.hdf5) file."),
                     textOutput("single_cell_upload_atac_matrix_status")
                   ),
                   column(
@@ -169,16 +169,6 @@ ui <- dashboardPage(
                       buttonLabel = "Browse"
                     ),
                     checkboxInput("denoise_drug_matrix", "Apply denoising to uploaded drug matrix", FALSE)
-                  ),
-                  column(
-                    width = 6,
-                    pickerInput(
-                      "dslt_denoise_assays",
-                      "Select assays to denoise",
-                      choices = NULL,
-                      multiple = TRUE,
-                      options = pickerOptions(actionsBox = TRUE, noneSelectedText = "Awaiting lineage upload")
-                    )
                   )
                 )
               )
