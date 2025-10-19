@@ -9,6 +9,8 @@ source("https://raw.githubusercontent.com/YevhenAkimov/phenomics_scripts/main/ph
 source("https://raw.githubusercontent.com/YevhenAkimov/general_purpose_R/main/general_helpers.R")
 source("https://raw.githubusercontent.com/YevhenAkimov/graphics-R/main/colors.R")
 
+options(shiny.maxRequestSize = 10240 * 1024^2) # 1000 MB
+
 #------------------------------------------------seurat object
 # ATAC-seq
 #' 创建ATAC-seq Seurat对象
@@ -555,7 +557,8 @@ initializeDsltFromLmm <- function(output_dir,threshold = 2e-5) {
   dslt[["assays"]][["lineage"]] <- lmm_result_object$result
   rm(lmm_result_object)
   dslt$printLayerNames()
-  fraction_assay <- (dslt$getAssay("lineage","fraction"))
+  fraction_assay <- dslt$getAssay("lineage", "fraction")
+  fraction_assay <- as.matrix(fraction_assay)
   active_sample_ids <- rownames(fraction_assay)[(matrixStats::rowMaxs(fraction_assay) > threshold)]
   dslt$setActiveSamples(active_sample_ids)
   dslt
