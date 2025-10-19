@@ -43,20 +43,99 @@ read_mapping_file <- function(path) {
     obj <- as.data.frame(obj)
   }
   stopifnot(is.data.frame(obj))
-  colnames(obj) <- tolower(colnames(obj))
-  rename_cols <- intersect(c("barcode", "lineage", "lineage_barcode"), colnames(obj))
-  if (length(rename_cols)) {
-    obj$Barcode <- obj[[rename_cols[1]]]
+  if (!"cell_barcode" %in% names(obj) && !is.null(rownames(obj))) {
+    obj$cell_barcode <- rownames(obj)
   }
-  if ("cell_barcode" %in% colnames(obj)) {
-    obj$cell_barcode <- obj[["cell_barcode"]]
-  } else if ("cell" %in% colnames(obj)) {
-    obj$cell_barcode <- obj[["cell"]]
+  original_names <- names(obj)
+  lower_names <- tolower(original_names)
+  locate_column <- function(target) {
+    idx <- which(lower_names == tolower(target))
+    if (length(idx)) {
+      original_names[idx[1]]
+    } else {
+      NA_character_
+    }
   }
-  if (!"Barcode" %in% colnames(obj) || !"cell_barcode" %in% colnames(obj)) {
-    stop("Mapping file must contain barcode and cell_barcode columns")
+
+  rename_map <- c(
+    cell_barcode = locate_column("cell_barcode"),
+    UMI = locate_column("umi"),
+    Header = locate_column("header"),
+    Barcode = locate_column("barcode")
+  )
+
+  mapping <- obj
+  for (nm in names(rename_map)) {
+    col_name <- rename_map[[nm]]
+    if (!is.na(col_name)) {
+      mapping[[nm]] <- mapping[[col_name]]
+    }
   }
-  obj
+
+  required <- c("cell_barcode", "Barcode", "UMI", "Header")
+  missing_required <- setdiff(required, names(mapping))
+  if (length(missing_required)) {
+    stop(paste("Mapping file missing required columns:", paste(missing_required, collapse = ", ")))
+  }
+
+  mapping$cell_barcode <- as.character(mapping$cell_barcode)
+  mapping$Barcode <- as.character(mapping$Barcode)
+  mapping$UMI <- as.character(mapping$UMI)
+  mapping$Header <- as.character(mapping$Header)
+
+  mapping
+}
+
+validate_10x_components <- function(file_names) {
+  lower <- tolower(file_names)
+  required_patterns <- list(
+    matrix = "matrix",
+    mtx = "mtx",
+    barcodes = "barcode",
+    features = "feature|gene|peak"
+  )
+  checks <- vapply(required_patterns, function(pattern) {
+    any(grepl(pattern, lower))
+  }, logical(1))
+  if (!all(checks[c("matrix", "mtx", "barcodes", "features")])) {
+    stop("Please upload matrix.mtx(.gz), features/peaks.tsv(.gz), and barcodes.tsv(.gz) files.")
+  }
+  invisible(TRUE)
+}
+
+copy_upload_to_temp_dir <- function(file_info) {
+  if (is.null(file_info) || nrow(file_info) == 0) {
+    return(NULL)
+  }
+  validate_10x_components(file_info$name)
+  temp_dir <- tempfile("tenx_")
+  dir.create(temp_dir)
+  for (i in seq_len(nrow(file_info))) {
+    dest <- file.path(temp_dir, basename(file_info$name[i]))
+    file.copy(file_info$datapath[i], dest, overwrite = TRUE)
+  }
+  temp_dir
+}
+
+read_10x_from_upload <- function(file_info) {
+  temp_dir <- copy_upload_to_temp_dir(file_info)
+  if (is.null(temp_dir)) {
+    return(NULL)
+  }
+  on.exit(unlink(temp_dir, recursive = TRUE), add = TRUE)
+  Read10X(data.dir = temp_dir)
+}
+
+preserve_uploaded_file <- function(file_info) {
+  if (is.null(file_info)) {
+    return(NULL)
+  }
+  stopifnot(nrow(file_info) == 1)
+  temp_dir <- tempfile("upload_")
+  dir.create(temp_dir)
+  dest <- file.path(temp_dir, basename(file_info$name))
+  file.copy(file_info$datapath, dest, overwrite = TRUE)
+  dest
 }
 
 normalize_matrix <- function(mat) {
@@ -258,42 +337,53 @@ server <- function(input, output, session) {
   # Initial upload status messages ---------------------------------------
   # -----------------------------------------------------------------------
   output$lineage_upload_status <- renderText("Awaiting lineage RDS upload.")
-  output$single_cell_upload_status <- renderText("Awaiting single-cell RDS upload.")
-  output$lineage_upload_rna_h5_status <- renderText("Optional: upload lineage RNA matrix.")
-  output$single_cell_upload_rna_h5_status <- renderText("Optional: upload single-cell RNA matrix.")
-  output$lineage_upload_atac_h5_status <- renderText("Optional: upload lineage ATAC matrix.")
-  output$single_cell_upload_atac_h5_status <- renderText("Optional: upload single-cell ATAC matrix.")
+  output$single_cell_upload_status <- renderText({
+    rna_ready <- !is.null(input$single_cell_rna_matrix_files) && nrow(input$single_cell_rna_matrix_files) >= 3
+    atac_ready <- !is.null(input$single_cell_atac_matrix_files) && nrow(input$single_cell_atac_matrix_files) >= 3
+    if (rna_ready && atac_ready) {
+      "Single-cell RNA and ATAC matrices detected."
+    } else if (rna_ready) {
+      "Single-cell RNA matrix detected. Upload ATAC inputs if needed."
+    } else if (atac_ready) {
+      "Single-cell ATAC matrix detected. Upload RNA inputs if needed."
+    } else {
+      "Awaiting single-cell matrix uploads."
+    }
+  })
+  output$single_cell_upload_rna_matrix_status <- renderText({
+    if (!is.null(input$single_cell_rna_matrix_files) && nrow(input$single_cell_rna_matrix_files) >= 3) {
+      "Single-cell RNA matrix files uploaded."
+    } else {
+      "Awaiting RNA matrix files (matrix.mtx, features.tsv, barcodes.tsv)."
+    }
+  })
+  output$single_cell_upload_atac_matrix_status <- renderText({
+    if (!is.null(input$single_cell_atac_matrix_files) && nrow(input$single_cell_atac_matrix_files) >= 3) {
+      "Single-cell ATAC matrix files uploaded."
+    } else {
+      "Awaiting ATAC matrix files (matrix.mtx, peaks.tsv, barcodes.tsv)."
+    }
+  })
+  output$single_cell_atac_metadata_status <- renderText({
+    if (!is.null(input$single_cell_atac_metadata_file)) {
+      "ATAC metadata file uploaded."
+    } else {
+      "Awaiting ATAC metadata file."
+    }
+  })
+  output$single_cell_atac_fragments_status <- renderText({
+    if (!is.null(input$single_cell_atac_fragments_file)) {
+      "ATAC fragments file uploaded."
+    } else {
+      "Awaiting ATAC fragments file."
+    }
+  })
   output$lineage_rna_mapping_status <- renderText("Optional: upload RNA barcode mapping file.")
   output$single_cell_atac_mapping_status <- renderText("Optional: upload ATAC barcode mapping file.")
 
   observeEvent(input$lineage_rds_file, {
     req(input$lineage_rds_file)
     output$lineage_upload_status <- renderText("Lineage data ready for loading.")
-  })
-
-  observeEvent(input$single_cell_rds_file, {
-    req(input$single_cell_rds_file)
-    output$single_cell_upload_status <- renderText("Single Cell data ready for loading.")
-  })
-
-  observeEvent(input$lineage_rna_h5_file, {
-    req(input$lineage_rna_h5_file)
-    output$lineage_upload_rna_h5_status <- renderText("Lineage RNA matrix uploaded.")
-  })
-
-  observeEvent(input$single_cell_rna_h5_file, {
-    req(input$single_cell_rna_h5_file)
-    output$single_cell_upload_rna_h5_status <- renderText("Single-cell RNA matrix uploaded.")
-  })
-
-  observeEvent(input$lineage_atac_h5_file, {
-    req(input$lineage_atac_h5_file)
-    output$lineage_upload_atac_h5_status <- renderText("Lineage ATAC matrix uploaded.")
-  })
-
-  observeEvent(input$single_cell_atac_h5_file, {
-    req(input$single_cell_atac_h5_file)
-    output$single_cell_upload_atac_h5_status <- renderText("Single-cell ATAC matrix uploaded.")
   })
 
   observeEvent(input$lineage_rna_mapping_file, {
@@ -346,46 +436,32 @@ server <- function(input, output, session) {
       updatePickerInput(session, "lineage_drug_select", choices = drug_choices)
       updatePickerInput(session, "single_drug_select", choices = drug_choices)
 
-      # Load additional single-cell RDS if provided ---------------------
-      if (!is.null(input$single_cell_rds_file)) {
-        sc_obj <- readRDS(input$single_cell_rds_file$datapath)
-        if (inherits(sc_obj, "Seurat")) {
-          state$seurat$sc_rna_raw <- sc_obj
-        } else {
-          warning("Single-cell RDS is not a Seurat object; skipping.")
-        }
-      }
-
       # Optional RNA matrices ------------------------------------------
-      if (!is.null(input$single_cell_rna_h5_file)) {
-        sc_rna <- create_rna_seurat(input$single_cell_rna_h5_file$datapath)
-        state$seurat$sc_rna_raw <- sc_rna
-      }
-
-      if (!is.null(input$lineage_rna_h5_file)) {
-        lineage_rna <- create_rna_seurat(input$lineage_rna_h5_file$datapath)
-        state$seurat$pb_rna <- lineage_rna
+      if (!is.null(input$single_cell_rna_matrix_files) && nrow(input$single_cell_rna_matrix_files) > 0) {
+        rna_counts <- read_10x_from_upload(input$single_cell_rna_matrix_files)
+        if (!is.null(rna_counts)) {
+          sc_rna <- create_rna_seurat(matrix_data = rna_counts)
+          state$seurat$sc_rna_raw <- sc_rna
+        }
       }
 
       # Optional ATAC matrices -----------------------------------------
-      if (!is.null(input$single_cell_atac_h5_file)) {
-        atac_counts <- Read10X_h5(input$single_cell_atac_h5_file$datapath)
-        if (is.list(atac_counts)) {
-          nm <- grep("Peaks|ATAC", names(atac_counts), value = TRUE)[1]
-          atac_counts <- atac_counts[[nm]]
+      atac_matrix_provided <- !is.null(input$single_cell_atac_matrix_files) && nrow(input$single_cell_atac_matrix_files) > 0
+      atac_metadata_provided <- !is.null(input$single_cell_atac_metadata_file)
+      atac_fragments_provided <- !is.null(input$single_cell_atac_fragments_file)
+      if (atac_matrix_provided || atac_metadata_provided || atac_fragments_provided) {
+        if (!(atac_matrix_provided && atac_metadata_provided && atac_fragments_provided)) {
+          stop("Please upload ATAC matrix files, metadata, and fragments together.")
         }
-        sc_atac <- CreateSeuratObject(counts = atac_counts, assay = "ATAC")
+        atac_counts <- read_10x_from_upload(input$single_cell_atac_matrix_files)
+        metadata_path <- preserve_uploaded_file(input$single_cell_atac_metadata_file)
+        fragments_path <- preserve_uploaded_file(input$single_cell_atac_fragments_file)
+        sc_atac <- create_atac_seurat(
+          counts_data = atac_counts,
+          metadata_file = metadata_path,
+          fragments_file = fragments_path
+        )
         state$seurat$sc_atac_raw <- sc_atac
-      }
-
-      if (!is.null(input$lineage_atac_h5_file)) {
-        atac_counts <- Read10X_h5(input$lineage_atac_h5_file$datapath)
-        if (is.list(atac_counts)) {
-          nm <- grep("Peaks|ATAC", names(atac_counts), value = TRUE)[1]
-          atac_counts <- atac_counts[[nm]]
-        }
-        lineage_atac <- CreateSeuratObject(counts = atac_counts, assay = "ATAC")
-        state$seurat$pb_atac <- lineage_atac
       }
 
       # Mapping files ---------------------------------------------------
@@ -436,11 +512,13 @@ server <- function(input, output, session) {
 
       output$upload_summary <- renderText({
         lineage_status <- if (is.null(state$dslt)) "Not loaded" else "Loaded"
-        single_cell_status <- if (is.null(state$seurat$sc_rna_raw)) "Not uploaded" else "Uploaded"
+        single_cell_rna_status <- if (is.null(state$seurat$sc_rna_raw)) "Not uploaded" else "Uploaded"
+        single_cell_atac_status <- if (is.null(state$seurat$sc_atac_raw)) "Not uploaded" else "Uploaded"
         mapping_status <- if (is.null(state$mapping$rna) && is.null(state$mapping$atac)) "Not provided" else "Provided"
         paste(
           "Lineage data:", lineage_status,
-          "\nSingle cell data:", single_cell_status,
+          "\nSingle-cell RNA:", single_cell_rna_status,
+          "\nSingle-cell ATAC:", single_cell_atac_status,
           "\nMapping:", mapping_status,
           "\nDenoised assays:", ifelse(length(state$denoised_assays), paste(state$denoised_assays, collapse = ", "), "None")
         )

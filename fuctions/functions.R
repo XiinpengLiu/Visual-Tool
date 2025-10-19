@@ -20,26 +20,50 @@ source("https://raw.githubusercontent.com/YevhenAkimov/graphics-R/main/colors.R"
 #' @param min_cells 最少细胞数，默认10
 #' @param min_features 最少特征数，默认200
 #' @return Seurat对象，包含ATAC-seq数据和注释信息
-create_atac_seurat <- function(h5_file, 
-                                metadata_file, 
+create_atac_seurat <- function(h5_file = NULL,
+                                counts_data = NULL,
+                                metadata_file,
                                 fragments_file,
                                 genome = "hg38",
                                 min_cells = 10,
                                 min_features = 200) {
-  
-  # 读取10X h5文件
-  counts <- Read10X_h5(filename = h5_file)
-  
+
+  if (!is.null(counts_data)) {
+    counts <- counts_data
+  } else {
+    stopifnot(!is.null(h5_file))
+    counts <- Read10X_h5(filename = h5_file)
+  }
+
   # 读取元数据
-  metadata <- read.csv(
-    file = metadata_file,
-    header = TRUE,
-    row.names = 1
-  )
+  metadata_ext <- tolower(tools::file_ext(metadata_file))
+  metadata <- if (metadata_ext %in% c("tsv", "txt")) {
+    read.delim(
+      file = metadata_file,
+      header = TRUE,
+      row.names = 1,
+      check.names = FALSE
+    )
+  } else {
+    read.csv(
+      file = metadata_file,
+      header = TRUE,
+      row.names = 1,
+      check.names = FALSE
+    )
+  }
   
   # 创建染色质测序对象
+  counts_mat <- if (is.list(counts)) {
+    idx <- grep("Peaks|ATAC|chromatin|acc", names(counts), ignore.case = TRUE)
+    nm <- if (length(idx)) names(counts)[idx[1]] else names(counts)[1]
+    counts[[nm]]
+  } else {
+    counts
+  }
+
   chrom_assay <- CreateChromatinAssay(
-    counts = counts,
+    counts = counts_mat,
     sep = c(":", "-"),
     genome = genome,
     fragments = fragments_file,
@@ -78,13 +102,18 @@ create_atac_seurat <- function(h5_file,
 #' @param min_features 最少特征数，默认200
 #' @param min_cells 最少细胞数，默认3
 #' @return Seurat对象，包含RNA-seq数据
-create_rna_seurat <- function(h5_file,
+create_rna_seurat <- function(h5_file = NULL,
+                               matrix_data = NULL,
                                min_features = 200,
                                min_cells = 3) {
-  
-  # 读取10X h5文件
-  H_RNA <- Read10X_h5(h5_file)
-  
+
+  if (!is.null(matrix_data)) {
+    H_RNA <- matrix_data
+  } else {
+    stopifnot(!is.null(h5_file))
+    H_RNA <- Read10X_h5(h5_file)
+  }
+
   # 提取基因表达矩阵
   mat <- if (is.list(H_RNA)) {
     # 常见键名："Gene Expression" 或 "Gene Expression-AB" 等
