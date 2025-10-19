@@ -30,7 +30,8 @@ ui <- dashboardPage(
   dashboardBody(
     tags$head(
       tags$style(HTML(
-        "        .control-spacer {
+        "
+        .control-spacer {
           margin-top: 15px;
         }
 
@@ -41,6 +42,50 @@ ui <- dashboardPage(
         .export-history-table {
           margin-top: 10px;
         }
+
+        .upload-section {
+          border-left: 3px solid #3c8dbc;
+          padding-left: 15px;
+          margin-bottom: 20px;
+        }
+
+        .upload-section h4 {
+          color: #3c8dbc;
+          font-weight: 600;
+          margin-bottom: 10px;
+        }
+
+        .status-text {
+          padding: 8px 12px;
+          background-color: #f4f4f4;
+          border-radius: 4px;
+          margin-top: 8px;
+          font-size: 13px;
+        }
+
+        .action-buttons {
+          display: flex;
+          gap: 10px;
+          margin-top: 15px;
+        }
+
+        .action-buttons .btn {
+          flex: 1;
+        }
+
+        .upload-summary-box {
+          background-color: #f9f9f9;
+          border: 1px solid #ddd;
+          border-radius: 4px;
+          padding: 15px;
+          margin-top: 20px;
+        }
+
+        .upload-summary-box h4 {
+          margin-top: 0;
+          color: #333;
+          font-size: 16px;
+        }
       "
       ))
     ),
@@ -49,160 +94,217 @@ ui <- dashboardPage(
       # 3.0 Data Upload Tab
       # =================================================================
       tabItem(tabName = "upload",
-        h2("Data Upload"),
+        h2(icon("upload"), "Data Upload"),
+        p("Upload and configure your multi-omic experiment data. Required files must be loaded first, followed by optional supplements."),
+        
         fluidRow(
-          box(
-            title = "Upload Experiment Outputs",
-            width = 12,
-            solidHeader = TRUE,
-            status = "primary",
-
-            tabBox(
-              width = 12,
-              id = "upload_groups",
-              tabPanel(
-                title = "Required Files",
-                fluidRow(
-                  column(
-                    width = 6,
-                    h4("Lineage Level"),
-                    fileInput(
-                      "lineage_rds_file",
-                      "Select lineage drug-response RDS file",
-                      accept = c(".rds", ".RDS"),
-                      buttonLabel = "Browse"
-                    ),
-                    helpText("Upload the processed lineage-level Seurat/SingleCellExperiment object."),
-                    textOutput("lineage_upload_status")
-                  ),
-                  column(
-                    width = 6,
-                    h4("Single-cell Level"),
-                    helpText("Single-cell response objects are derived from uploaded matrices."),
-                    textOutput("single_cell_upload_status")
-                  )
-                )
+          # Left column: Required Files
+          column(width = 6,
+            box(
+              title = tagList(icon("file-alt"), "Required Files"),
+              width = NULL,
+              solidHeader = TRUE,
+              status = "primary",
+              
+              div(class = "upload-section",
+                h4(icon("dna"), "Lineage Level Data"),
+                fileInput(
+                  "lineage_rds_file",
+                  "Lineage drug-response RDS file",
+                  accept = c(".rds", ".RDS"),
+                  buttonLabel = "Browse...",
+                  placeholder = "No file selected"
+                ),
+                helpText("Upload the processed lineage-level Seurat/SingleCellExperiment object containing drug response data."),
+                div(class = "status-text", textOutput("lineage_upload_status"))
               ),
-              tabPanel(
-                title = "Optional Supplements",
-                fluidRow(
-                  column(
-                    width = 6,
-                    fileInput(
-                      "single_cell_rna_matrix_files",
-                      "Select single-cell RNA matrix files",
-                      accept = c(".mtx", ".mtx.gz", ".tsv", ".tsv.gz", ".h5", ".hdf5"),
-                      multiple = TRUE,
-                      buttonLabel = "Browse"
-                    ),
-                    helpText("Upload the matrix.mtx(.gz), features.tsv(.gz), and barcodes.tsv(.gz) files, or a single 10x HDF5 (.h5/.hdf5) file."),
-                    textOutput("single_cell_upload_rna_matrix_status")
-                  )
+              
+              hr(),
+              
+              div(class = "upload-section",
+                h4(icon("sliders-h"), "Processing Options"),
+                textInput(
+                  "barcode_suffix", 
+                  tagList(icon("filter"), "Barcode suffix filter"),
+                  value = "-1$",
+                  placeholder = "Regex pattern (e.g., -1$)"
                 ),
-                fluidRow(
-                  column(
-                    width = 6,
-                    fileInput(
-                      "single_cell_atac_matrix_files",
-                      "Select single-cell ATAC matrix files",
-                      accept = c(".mtx", ".mtx.gz", ".tsv", ".tsv.gz", ".bed", ".bed.gz", ".h5", ".hdf5"),
-                      multiple = TRUE,
-                      buttonLabel = "Browse"
-                    ),
-                    helpText("Upload the matrix.mtx(.gz), peaks/features.tsv(.gz), and barcodes.tsv(.gz) files, or a single 10x HDF5 (.h5/.hdf5) file."),
-                    textOutput("single_cell_upload_atac_matrix_status")
-                  ),
-                  column(
-                    width = 6,
-                    fileInput(
-                      "single_cell_atac_metadata_file",
-                      "Select single-cell ATAC metadata (.csv/.tsv)",
-                      accept = c(".csv", ".tsv", ".txt"),
-                      buttonLabel = "Browse"
-                    ),
-                    helpText("Optional: provide a metadata file matching the ATAC matrix barcodes."),
-                    textOutput("single_cell_atac_metadata_status")
-                  )
-                ),
-                fluidRow(
-                  column(
-                    width = 6,
-                    fileInput(
-                      "single_cell_atac_fragments_file",
-                      "Select single-cell ATAC fragments file",
-                      accept = c(".tsv", ".tsv.gz"),
-                      buttonLabel = "Browse"
-                    ),
-                    helpText("Upload the fragments.tsv(.gz) file for ATAC integration."),
-                    textOutput("single_cell_atac_fragments_status")
-                  ),
-                  column(
-                    width = 6,
-                    fileInput(
-                      "lineage_rna_mapping_file",
-                      "Select lineage/single-cell RNA barcode mapping file",
-                      accept = c(".rds", ".csv", ".tsv"),
-                      buttonLabel = "Browse"
-                    ),
-                    helpText("Map lineage-level barcodes to single-cell identifiers."),
-                    textOutput("lineage_rna_mapping_status")
-                  ),
-                  column(
-                    width = 6,
-                    fileInput(
-                      "single_cell_atac_mapping_file",
-                      "Select lineage/single-cell ATAC barcode mapping file",
-                      accept = c(".rds", ".csv", ".tsv"),
-                      buttonLabel = "Browse"
-                    ),
-                    helpText("Optional mapping to reconcile ATAC barcodes across assays."),
-                    textOutput("single_cell_atac_mapping_status")
-                  )
-                ),
-                fluidRow(
-                  column(
-                    width = 6,
-                    fileInput(
-                      "drug_matrix_file",
-                      "Optional drug-response matrix",
-                      accept = c(".rds", ".RDS", ".csv", ".tsv"),
-                      buttonLabel = "Browse"
-                    ),
-                  )
-                )
-              )
-            ),
-
-            hr(),
-
-            fluidRow(
-              column(
-                width = 4,
-                textInput("barcode_suffix", "Barcode suffix filter", value = "-1$",
-                  placeholder = "Regex suffix, e.g. -1$")
-              ),
-              column(
-                width = 4,
+                helpText("Filter cell barcodes using regex pattern. Default removes '-1' suffix."),
+                
                 pickerInput(
                   "denoise_assays_choice",
-                  "Denoise lineage assays",
+                  tagList(icon("broom"), "Select assays to denoise"),
                   choices = NULL,
                   multiple = TRUE,
-                  options = pickerOptions(actionsBox = TRUE, noneSelectedText = "Awaiting lineage upload")
+                  options = pickerOptions(
+                    actionsBox = TRUE, 
+                    noneSelectedText = "Load lineage data first",
+                    selectAllText = "Select All",
+                    deselectAllText = "Deselect All"
+                  )
+                ),
+                helpText("Apply adaptive kernel denoising to selected assays to reduce noise.")
+              ),
+              
+              hr(),
+              
+              div(class = "action-buttons",
+                actionButton("load_lineage_rds", tagList(icon("file-import"), "Load Lineage"), class = "btn-primary"),
+                actionButton("apply_denoise", tagList(icon("magic"), "Apply Denoising"), class = "btn-warning")
+              )
+            )
+          ),
+          
+          # Right column: Optional Supplements
+          column(width = 6,
+            box(
+              title = tagList(icon("plus-circle"), "Optional Supplements"),
+              width = NULL,
+              solidHeader = TRUE,
+              status = "info",
+              
+              div(class = "upload-section",
+                h4(icon("dna"), "Single-cell RNA Matrix"),
+                fileInput(
+                  "single_cell_rna_matrix_files",
+                  "RNA matrix files (10x format)",
+                  accept = c(".mtx", ".mtx.gz", ".tsv", ".tsv.gz", ".h5", ".hdf5"),
+                  multiple = TRUE,
+                  buttonLabel = "Browse...",
+                  placeholder = "No files selected"
+                ),
+                helpText("Upload matrix.mtx(.gz), features.tsv(.gz), barcodes.tsv(.gz), or a single 10x HDF5 file (.h5/.hdf5)."),
+                div(class = "status-text", textOutput("single_cell_upload_rna_matrix_status"))
+              ),
+              
+              hr(),
+              
+              div(class = "upload-section",
+                h4(icon("chart-area"), "Single-cell ATAC Matrix"),
+                fileInput(
+                  "single_cell_atac_matrix_files",
+                  "ATAC matrix files (10x format)",
+                  accept = c(".mtx", ".mtx.gz", ".tsv", ".tsv.gz", ".bed", ".bed.gz", ".h5", ".hdf5"),
+                  multiple = TRUE,
+                  buttonLabel = "Browse...",
+                  placeholder = "No files selected"
+                ),
+                helpText("Upload matrix.mtx(.gz), peaks.tsv(.gz), barcodes.tsv(.gz), or a single 10x HDF5 file."),
+                div(class = "status-text", textOutput("single_cell_upload_atac_matrix_status"))
+              ),
+              
+              hr(),
+              
+              div(class = "action-buttons",
+                actionButton("load_supplements", tagList(icon("download"), "Load Supplements"), class = "btn-info btn-block")
+              )
+            )
+          )
+        ),
+        
+        # Additional Files Section
+        fluidRow(
+          box(
+            title = tagList(icon("folder-open"), "Additional Files"),
+            width = 12,
+            solidHeader = TRUE,
+            status = "success",
+            collapsible = TRUE,
+            collapsed = TRUE,
+            
+            fluidRow(
+              column(width = 4,
+                div(class = "upload-section",
+                  h4(icon("paperclip"), "ATAC Fragments"),
+                  fileInput(
+                    "single_cell_atac_fragments_file",
+                    "Fragments file + index",
+                    accept = c(".tsv", ".tsv.gz", ".tbi", ".tbi.gz"),
+                    multiple = TRUE,
+                    buttonLabel = "Browse...",
+                    placeholder = "No files selected"
+                  ),
+                  helpText("Upload fragments.tsv(.gz) and its .tbi index file."),
+                  div(class = "status-text", textOutput("single_cell_atac_fragments_status"))
                 )
               ),
-              column(
-                width = 4,
-                actionButton("load_all_data", "Load selected data", class = "btn-success btn-block")
+              
+              column(width = 4,
+                div(class = "upload-section",
+                  h4(icon("link"), "RNA Mapping"),
+                  fileInput(
+                    "lineage_rna_mapping_file",
+                    "Barcode mapping file",
+                    accept = c(".rds", ".csv", ".tsv"),
+                    buttonLabel = "Browse...",
+                    placeholder = "No file selected"
+                  ),
+                  helpText("Map lineage barcodes to single-cell RNA identifiers."),
+                  div(class = "status-text", textOutput("lineage_rna_mapping_status"))
+                )
+              ),
+              
+              column(width = 4,
+                div(class = "upload-section",
+                  h4(icon("link"), "ATAC Mapping"),
+                  fileInput(
+                    "single_cell_atac_mapping_file",
+                    "Barcode mapping file",
+                    accept = c(".rds", ".csv", ".tsv"),
+                    buttonLabel = "Browse...",
+                    placeholder = "No file selected"
+                  ),
+                  helpText("Optional mapping for ATAC barcodes."),
+                  div(class = "status-text", textOutput("single_cell_atac_mapping_status"))
+                )
               )
             ),
-
+            
+            hr(),
+            
             fluidRow(
-              column(
-                width = 12,
-                h4("Upload Summary"),
-                verbatimTextOutput("upload_summary")
+              column(width = 6,
+                div(class = "upload-section",
+                  h4(icon("capsules"), "External Drug Matrix"),
+                  fileInput(
+                    "drug_matrix_file",
+                    "Drug response matrix",
+                    accept = c(".rds", ".RDS", ".csv", ".tsv"),
+                    buttonLabel = "Browse...",
+                    placeholder = "No file selected"
+                  ),
+                  helpText("Optional external drug-response matrix to integrate with existing data.")
+                )
               )
+            )
+          )
+        ),
+        
+        # Upload Summary Section
+        fluidRow(
+          box(
+            title = tagList(icon("info-circle"), "Upload Summary"),
+            width = 12,
+            solidHeader = TRUE,
+            status = "warning",
+            
+            div(class = "upload-summary-box",
+              verbatimTextOutput("upload_summary")
+            ),
+            
+            hr(),
+            
+            p(
+              icon("exclamation-triangle"), 
+              strong("Next Steps:"),
+              br(),
+              "1. After loading lineage data, proceed to", tags$b("QC Settings"), "to configure quality control parameters.",
+              br(),
+              "2. Apply denoising if needed to reduce noise in drug response data.",
+              br(),
+              "3. Load supplements (RNA/ATAC matrices and mapping files) to enable single-cell analysis.",
+              br(),
+              "4. Apply QC settings with RNA mapping to generate single-cell drug response data."
             )
           )
         )
@@ -494,7 +596,7 @@ ui <- dashboardPage(
                   options = pickerOptions(
                     actionsBox = TRUE,
                     liveSearch = TRUE,
-                    noneSelectedText = "Awaiting uploaded metadata"
+                    noneSelectedText = "Drug data requires RNA mapping - apply QC settings first"
                   )
                 )
               ),
