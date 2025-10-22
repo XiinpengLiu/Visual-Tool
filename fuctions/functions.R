@@ -862,7 +862,7 @@ run_neighbors_and_clusters <- function(seu, res = NULL, dimsl = 1, dimsh = 30, r
 #' @export
 run_kmeans_clustering <- function(seu, knum = 5, dimsl = 1, dimsh = 30, nstart = 20, reduction = "pca") {
   pc <- Embeddings(seu, reduction)[, dimsl:dimsh]
-  km <- kmeans(pc, centers = knum, nstart = nstart)
+  km <- kmeans(pc, centers = knum, iter.max = 1000, nstart = nstart)
   seu[[paste0("kmeans", knum)]] <- as.factor(km$cluster)
   seu
 }

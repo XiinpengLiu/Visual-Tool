@@ -14,7 +14,8 @@ library(stringr)
 library(ggplot2)
 library(glue)
 library(EnsDb.Hsapiens.v86)
-
+library(SingleCellExperiment)
+library(muscat)
 source("fuctions/functions.R")
 
 # -------------------------------------------------------------------------
