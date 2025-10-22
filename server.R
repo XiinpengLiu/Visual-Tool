@@ -909,6 +909,17 @@ server <- function(input, output, session) {
       seu <- cluster_res$seu
       state$dslt <- cluster_res$dslt
 
+      kmeans_res <- ensure_kmeans_clusters(
+        seu,
+        k = 5,
+        dims = 1:30,
+        dslt = state$dslt,
+        assays = "RNA",
+        level = "single cell"
+      )
+      seu <- kmeans_res$seu
+      state$dslt <- kmeans_res$dslt
+
       umap_res <- ensure_umap(seu, input$single_umap_pca_dims, dslt = state$dslt, assays = "RNA", level = "single cell")
       seu <- umap_res$seu
       state$dslt <- umap_res$dslt
@@ -955,6 +966,17 @@ server <- function(input, output, session) {
       seu_atac <- atac_cluster_res$seu
       state$dslt <- atac_cluster_res$dslt
 
+      kmeans_res <- ensure_kmeans_clusters(
+        seu_atac,
+        k = 5,
+        dims = 2:30,
+        dslt = state$dslt,
+        assays = "ATAC",
+        level = "single cell"
+      )
+      seu_atac <- kmeans_res$seu
+      state$dslt <- kmeans_res$dslt
+
       atac_umap_res <- ensure_umap(seu_atac, input$single_umap_svd_dims, dslt = state$dslt, assays = "ATAC", level = "single cell")
       seu_atac <- atac_umap_res$seu
       state$dslt <- atac_umap_res$dslt
@@ -999,6 +1021,17 @@ server <- function(input, output, session) {
       pb_rna <- cluster_res$seu
       state$dslt <- cluster_res$dslt
 
+      kmeans_res <- ensure_kmeans_clusters(
+        pb_rna,
+        k = 5,
+        dims = 1:30,
+        dslt = state$dslt,
+        assays = "RNA",
+        level = "lineage"
+      )
+      pb_rna <- kmeans_res$seu
+      state$dslt <- kmeans_res$dslt
+
       umap_res <- ensure_umap(pb_rna, input$lineage_umap_pca_dims, dslt = state$dslt, assays = "RNA", level = "lineage")
       pb_rna <- umap_res$seu
       state$dslt <- umap_res$dslt
@@ -1032,6 +1065,17 @@ server <- function(input, output, session) {
       cluster_res <- ensure_clusters(pb_atac, dslt = state$dslt, dims = 2:30, assays = "ATAC", level = "lineage")
       pb_atac <- cluster_res$seu
       state$dslt <- cluster_res$dslt
+
+      kmeans_res <- ensure_kmeans_clusters(
+        pb_atac,
+        k = 5,
+        dims = 2:30,
+        dslt = state$dslt,
+        assays = "ATAC",
+        level = "lineage"
+      )
+      pb_atac <- kmeans_res$seu
+      state$dslt <- kmeans_res$dslt
 
       # UMAP降维
       umap_res <- ensure_umap(pb_atac, input$lineage_umap_svd_dims, dslt = state$dslt, assays = "ATAC", level = "lineage")
