@@ -445,7 +445,7 @@ ensure_kmeans_clusters <- function(seu, k, res = 0.5, dims = 1:30, dslt = NULL, 
   dims_seq <- seq(dims[1], dims[length(dims)])
   cluster_res <- ensure_clusters(seu,
     dslt = dslt,
-    res = res
+    res = res,
     dims = dims_seq,
     assays = assays,
     level = level

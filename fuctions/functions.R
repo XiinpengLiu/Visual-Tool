@@ -860,10 +860,16 @@ add_clusters_to_dslt <- function(dslt, sc_seu, knum = 5, assays = "RNA", level =
   if (is.null(colmeta[[assays]])) colmeta[[assays]] <- list()
 
   row_names_sc <- rownames(sc_seu@meta.data)
-  selected_cols_sc <- sc_seu@meta.data[, c(paste0("kmeans", knum), "seurat_clusters"), drop = FALSE]
+  target_cols <- c(paste0("kmeans", knum), "seurat_clusters")
+  available_cols <- intersect(target_cols, colnames(sc_seu@meta.data))
+  selected_cols_sc <- sc_seu@meta.data[, available_cols, drop = FALSE]
   new_df_sc <- data.frame(Barcode = row_names_sc, selected_cols_sc, stringsAsFactors = FALSE)
-  colnames(new_df_sc)[colnames(new_df_sc) == paste0("kmeans", knum)] <- "k"
-  colnames(new_df_sc)[colnames(new_df_sc) == "seurat_clusters"] <- "s"
+  if (paste0("kmeans", knum) %in% available_cols) {
+    colnames(new_df_sc)[colnames(new_df_sc) == paste0("kmeans", knum)] <- "k"
+  }
+  if ("seurat_clusters" %in% available_cols) {
+    colnames(new_df_sc)[colnames(new_df_sc) == "seurat_clusters"] <- "s"
+  }
 
   existing <- colmeta[[assays]][[level]]
   if (!is.null(existing)) {
