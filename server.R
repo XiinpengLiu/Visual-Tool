@@ -440,12 +440,12 @@ ensure_clusters <- function(seu, dslt = NULL, res = 0.8, dims = 1:30, assays = "
   list(seu = seu, dslt = dslt)
 }
 
-ensure_kmeans_clusters <- function(seu, k, dims = 1:30, dslt = NULL, assays = "RNA", level = "single cell") {
+ensure_kmeans_clusters <- function(seu, k, res = 0.5, dims = 1:30, dslt = NULL, assays = "RNA", level = "single cell") {
   k <- max(2, as.integer(k))
   dims_seq <- seq(dims[1], dims[length(dims)])
   cluster_res <- ensure_clusters(seu,
     dslt = dslt,
-    res = 0.8,
+    res = res
     dims = dims_seq,
     assays = assays,
     level = level
@@ -862,263 +862,272 @@ server <- function(input, output, session) {
   })
 
   observeEvent(input$apply_qc_settings, {
-    validate(need(!is.null(state$dslt), "Load datasets before applying QC."))
+    withProgress(message = "Applying QC...", value = 0, {
+      validate(need(!is.null(state$dslt), "Load datasets before applying QC."))
 
-    suffix <- input$barcode_suffix
-    if (!nzchar(suffix)) suffix <- NULL
+      suffix <- input$barcode_suffix
+      if (!nzchar(suffix)) suffix <- NULL
 
-    # RNA QC -------------------------------------------------------------
-    if (!is.null(state$seurat$sc_rna_raw)) {
-      seu <- state$seurat$sc_rna_raw
-      if (!is.null(suffix)) {
-        seu <- tryCatch(filter_cells_by_suffix(seu, suffix = suffix), error = function(e) seu)
-      }
-      seu <- filter_rna_qc(
-        seu,
-        min_features = input$rna_nfeature_min,
-        max_features = input$rna_nfeature_max,
-        min_counts = input$rna_ncount_min,
-        max_counts = input$rna_ncount_max,
-        max_percent_mt = input$rna_percent_mt_max,
-        verbose = FALSE
-      )
-
-      # 生成QC图
-      state$qc$rna_violin <- plot_rna_qc_violin(
-        seu,
-        min_features = input$rna_nfeature_min,
-        max_features = input$rna_nfeature_max,
-        max_percent_mt = input$rna_percent_mt_max
-      )
-      state$qc$rna_scatter <- plot_rna_qc_scatter(seu)
-
-      # SCTransform标准化 (在PCA之前)
-      seu <- SCTransform(seu, verbose = FALSE)
-
-      # 后续的PCA、聚类等分析
-      single_dims <- seq(input$single_umap_pca_dims[1], input$single_umap_pca_dims[2])
-      tsne_dims <- seq(input$single_tsne_pca_dims[1], input$single_tsne_pca_dims[2])
-      npcs_needed <- 50
-
-      pca_res <- ensure_pca(seu, dslt = state$dslt, npcs = npcs_needed, assays = "RNA", level = "single cell")
-      seu <- pca_res$seu
-      state$dslt <- pca_res$dslt
-      state$qc$rna_elbow <- ElbowPlot(seu)
-
-      cluster_res <- ensure_clusters(seu, dslt = state$dslt, res = 0.8, dims = 1:30, assays = "RNA", level = "single cell")
-      seu <- cluster_res$seu
-      state$dslt <- cluster_res$dslt
-
-      kmeans_res <- ensure_kmeans_clusters(
-        seu,
-        k = 5,
-        dims = 1:30,
-        dslt = state$dslt,
-        assays = "RNA",
-        level = "single cell"
-      )
-      seu <- kmeans_res$seu
-      state$dslt <- kmeans_res$dslt
-
-      umap_res <- ensure_umap(seu, input$single_umap_pca_dims, dslt = state$dslt, assays = "RNA", level = "single cell")
-      seu <- umap_res$seu
-      state$dslt <- umap_res$dslt
-
-      tsne_res <- ensure_tsne(seu, input$single_tsne_pca_dims, dslt = state$dslt, assays = "RNA", level = "single cell")
-      seu <- tsne_res$seu
-      state$dslt <- tsne_res$dslt
-
-      state$seurat$sc_rna <- seu
-    }
-
-    # ATAC QC ------------------------------------------------------------
-    if (!is.null(state$seurat$sc_atac_raw)) {
-      seu_atac <- state$seurat$sc_atac_raw
-      if (!is.null(suffix)) {
-        seu_atac <- tryCatch(filter_cells_by_suffix(seu_atac, suffix = suffix), error = function(e) seu_atac)
-      }
-      seu_atac <- calculate_nucleosome_signal(seu_atac)
-      seu_atac <- calculate_tss_enrichment(seu_atac)
-      seu_atac <- calculate_atac_qc_metrics(seu_atac)
-      seu_atac <- filter_atac_cells(
-        seu_atac,
-        ncount_min = input$atac_peak_fragments_min,
-        ncount_max = input$atac_peak_fragments_max,
-        pct_reads_min = input$atac_pct_reads_peaks_min,
-        blacklist_max = input$atac_blacklist_ratio_max,
-        nucleosome_max = input$atac_nucleosome_signal_max,
-        tss_min = input$atac_tss_enrichment_min,
-      )
-
-      seu_atac <- RunTFIDF(seu_atac)
-      seu_atac <- FindTopFeatures(seu_atac, min.cutoff = 'q0')
-      seu_atac <- RunSVD(seu_atac)
-
-      atac_dims <- seq(input$single_umap_pca_dims[1], input$single_umap_pca_dims[2])
-      atac_tsne_dims <- seq(input$single_tsne_pca_dims[1], input$single_tsne_pca_dims[2])
-      atac_npcs <- 50
-
-      atac_pca_res <- ensure_pca(seu_atac, dslt = state$dslt, npcs = atac_npcs, assays = "ATAC", level = "single cell")
-      seu_atac <- atac_pca_res$seu
-      state$dslt <- atac_pca_res$dslt
-
-      atac_cluster_res <- ensure_clusters(seu_atac, dslt = state$dslt, dims = 2:30, assays = "ATAC", level = "single cell")
-      seu_atac <- atac_cluster_res$seu
-      state$dslt <- atac_cluster_res$dslt
-
-      kmeans_res <- ensure_kmeans_clusters(
-        seu_atac,
-        k = 5,
-        dims = 2:30,
-        dslt = state$dslt,
-        assays = "ATAC",
-        level = "single cell"
-      )
-      seu_atac <- kmeans_res$seu
-      state$dslt <- kmeans_res$dslt
-
-      atac_umap_res <- ensure_umap(seu_atac, input$single_umap_svd_dims, dslt = state$dslt, assays = "ATAC", level = "single cell")
-      seu_atac <- atac_umap_res$seu
-      state$dslt <- atac_umap_res$dslt
-
-      atac_tsne_res <- ensure_tsne(seu_atac, input$single_tsne_svd_dims, dslt = state$dslt, assays = "ATAC", level = "single cell")
-      seu_atac <- atac_tsne_res$seu
-      state$dslt <- atac_tsne_res$dslt
-
-      # 生成QC图
-      state$qc$atac_density <- plot_tss_density_scatter(seu_atac)
-      state$qc$atac_fragment <- plot_fragment_histogram(seu_atac)
-      state$qc$atac_violin <- plot_atac_qc_violins(
-        seu_atac,
-        ncount_min = input$atac_peak_fragments_min,
-        ncount_max = input$atac_peak_fragments_max,
-        pct_reads_min = input$atac_pct_reads_peaks_min,
-        tss_min = input$atac_tss_enrichment_min,
-        nucleosome_max = input$atac_nucleosome_signal_max,
-        blacklist_max = input$atac_blacklist_ratio_max / 100
-      )
-      state$seurat$sc_atac <- seu_atac
-    }
-
-    # Mapping to lineage level -----------------------------------------
-    if (!is.null(state$mapping$rna) && !is.null(state$seurat$sc_rna)) {
-      pb_rna <- lineage_map_seurat_rna(
-        se = state$seurat$sc_rna,
-        bc = state$mapping$rna,
-        dslt = state$dslt,
-        assay = "RNA",
-        key = "rna"
-      )
-      lineage_dims <- seq(input$lineage_umap_pca_dims[1], input$lineage_umap_pca_dims[2])
-      lineage_tsne_dims <- seq(input$lineage_tsne_pca_dims[1], input$lineage_tsne_pca_dims[2])
-      lineage_npcs <- max(c(lineage_dims, lineage_tsne_dims))
-
-      pca_res <- ensure_pca(pb_rna, dslt = state$dslt, npcs = lineage_npcs, assays = "RNA", level = "lineage")
-      pb_rna <- pca_res$seu
-      state$dslt <- pca_res$dslt
-
-      cluster_res <- ensure_clusters(pb_rna, dslt = state$dslt, res = 0.8, dims = 1:30, assays = "RNA", level = "lineage")
-      pb_rna <- cluster_res$seu
-      state$dslt <- cluster_res$dslt
-
-      kmeans_res <- ensure_kmeans_clusters(
-        pb_rna,
-        k = 5,
-        dims = 1:30,
-        dslt = state$dslt,
-        assays = "RNA",
-        level = "lineage"
-      )
-      pb_rna <- kmeans_res$seu
-      state$dslt <- kmeans_res$dslt
-
-      umap_res <- ensure_umap(pb_rna, input$lineage_umap_pca_dims, dslt = state$dslt, assays = "RNA", level = "lineage")
-      pb_rna <- umap_res$seu
-      state$dslt <- umap_res$dslt
-
-      tsne_res <- ensure_tsne(pb_rna, input$lineage_tsne_pca_dims, dslt = state$dslt, assays = "RNA", level = "lineage")
-      pb_rna <- tsne_res$seu
-      state$dslt <- tsne_res$dslt
-      state$seurat$pb_rna <- pb_rna
-      state$lineage_cell_counts <- state$dslt[["assays"]][["rna_map"]]
-    }
-
-    if (!is.null(state$mapping$atac) && !is.null(state$seurat$sc_atac)) {
-      # 使用lineage_map_seurat_atac函数映射ATAC数据
-      pb_atac <- lineage_map_seurat_atac(
-        se = state$seurat$sc_atac,
-        bc = state$mapping$atac,
-        dslt = state$dslt,
-        assay = "peaks",
-        key = "atac"
-      )
-
-      atac_dims <- seq(input$lineage_umap_pca_dims[1], input$lineage_umap_pca_dims[2])
-      atac_tsne_dims <- seq(input$lineage_tsne_pca_dims[1], input$lineage_tsne_pca_dims[2])
-      atac_npcs <- 50
-
-      pca_res <- ensure_pca(pb_atac, dslt = state$dslt, npcs = atac_npcs, assays = "ATAC", level = "lineage")
-      pb_atac <- pca_res$seu
-      state$dslt <- pca_res$dslt
-
-      # 聚类分析
-      cluster_res <- ensure_clusters(pb_atac, dslt = state$dslt, dims = 2:30, assays = "ATAC", level = "lineage")
-      pb_atac <- cluster_res$seu
-      state$dslt <- cluster_res$dslt
-
-      kmeans_res <- ensure_kmeans_clusters(
-        pb_atac,
-        k = 5,
-        dims = 2:30,
-        dslt = state$dslt,
-        assays = "ATAC",
-        level = "lineage"
-      )
-      pb_atac <- kmeans_res$seu
-      state$dslt <- kmeans_res$dslt
-
-      # UMAP降维
-      umap_res <- ensure_umap(pb_atac, input$lineage_umap_svd_dims, dslt = state$dslt, assays = "ATAC", level = "lineage")
-      pb_atac <- umap_res$seu
-      state$dslt <- umap_res$dslt
-
-      # t-SNE降维
-      tsne_res <- ensure_tsne(pb_atac, input$lineage_tsne_svd_dims, dslt = state$dslt, assays = "ATAC", level = "lineage")
-      pb_atac <- tsne_res$seu
-      state$dslt <- tsne_res$dslt
-      
-      state$seurat$pb_atac <- pb_atac
-      showNotification("ATAC data successfully mapped to lineage level", type = "message")
-    }
-
-    # Store single cell drug values if mapping available ----------------
-    # 只有在成功映射后才生成并更新single_drug_values
-    if (!is.null(state$mapping$rna)) {
-      mapping_success <- tryCatch({
-        state$dslt <- map_lineage_to_single_cell(state$dslt, state$mapping$rna)
-        TRUE
-      }, error = function(e) {
-        showNotification(paste("Failed to map lineage to single-cell:", e$message), type = "warning")
-        FALSE
-      })
-      
-      if (mapping_success) {
-        state$single_drug_values <- state$dslt[["assays"]][["single_cell"]]
-        # 更新single-cell drug选择器
-        drug_choices_single <- extract_drug_choices(state$single_drug_values)
-        updatePickerInput(session, "single_drug_select", choices = drug_choices_single)
-        single_dataset_choices <- names(state$single_drug_values)
-        if (length(single_dataset_choices)) {
-          updateSelectInput(session, "single_rds_object_select", choices = single_dataset_choices, selected = single_dataset_choices[1])
+      # RNA QC -------------------------------------------------------------
+      rna_detail <- "RNA QC skipped (no RNA dataset loaded)"
+      if (!is.null(state$seurat$sc_rna_raw)) {
+        seu <- state$seurat$sc_rna_raw
+        if (!is.null(suffix)) {
+          seu <- tryCatch(filter_cells_by_suffix(seu, suffix = suffix), error = function(e) seu)
         }
-        showNotification("Single-cell drug response data successfully generated from lineage mapping.", type = "message")
+        seu <- filter_rna_qc(
+          seu,
+          min_features = input$rna_nfeature_min,
+          max_features = input$rna_nfeature_max,
+          min_counts = input$rna_ncount_min,
+          max_counts = input$rna_ncount_max,
+          max_percent_mt = input$rna_percent_mt_max,
+          verbose = FALSE
+        )
+
+        # 生成QC图
+        state$qc$rna_violin <- plot_rna_qc_violin(
+          seu,
+          min_features = input$rna_nfeature_min,
+          max_features = input$rna_nfeature_max,
+          max_percent_mt = input$rna_percent_mt_max
+        )
+        state$qc$rna_scatter <- plot_rna_qc_scatter(seu)
+
+        # SCTransform标准化 (在PCA之前)
+        seu <- SCTransform(seu, verbose = FALSE)
+
+        # 后续的PCA、聚类等分析
+        single_dims <- seq(input$single_umap_pca_dims[1], input$single_umap_pca_dims[2])
+        tsne_dims <- seq(input$single_tsne_pca_dims[1], input$single_tsne_pca_dims[2])
+        npcs_needed <- 50
+
+        pca_res <- ensure_pca(seu, dslt = state$dslt, npcs = npcs_needed, assays = "RNA", level = "single cell")
+        seu <- pca_res$seu
+        state$dslt <- pca_res$dslt
+        state$qc$rna_elbow <- ElbowPlot(seu)
+
+        kmeans_res <- ensure_kmeans_clusters(
+          seu,
+          k = 5,
+          res = 0.5,
+          dims = 1:30,
+          dslt = state$dslt,
+          assays = "RNA",
+          level = "single cell"
+        )
+        seu <- kmeans_res$seu
+        state$dslt <- kmeans_res$dslt
+
+        umap_res <- ensure_umap(seu, input$single_umap_pca_dims, dslt = state$dslt, assays = "RNA", level = "single cell")
+        seu <- umap_res$seu
+        state$dslt <- umap_res$dslt
+
+        tsne_res <- ensure_tsne(seu, input$single_tsne_pca_dims, dslt = state$dslt, assays = "RNA", level = "single cell")
+        seu <- tsne_res$seu
+        state$dslt <- tsne_res$dslt
+
+        state$seurat$sc_rna <- seu
+        rna_detail <- "RNA QC complete"
       }
-    }
+      incProgress(0.25, detail = rna_detail)
 
-    state$qc_applied <- TRUE
-    output$qc_settings_status <- renderText("QC settings applied successfully!")
+      # ATAC QC ------------------------------------------------------------
+      atac_detail <- "ATAC QC skipped (no ATAC dataset loaded)"
+      if (!is.null(state$seurat$sc_atac_raw)) {
+        seu_atac <- state$seurat$sc_atac_raw
+        if (!is.null(suffix)) {
+          seu_atac <- tryCatch(filter_cells_by_suffix(seu_atac, suffix = suffix), error = function(e) seu_atac)
+        }
+        seu_atac <- calculate_nucleosome_signal(seu_atac)
+        seu_atac <- calculate_tss_enrichment(seu_atac)
+        seu_atac <- calculate_atac_qc_metrics(seu_atac)
+        seu_atac <- filter_atac_cells(
+          seu_atac,
+          ncount_min = input$atac_peak_fragments_min,
+          ncount_max = input$atac_peak_fragments_max,
+          pct_reads_min = input$atac_pct_reads_peaks_min,
+          blacklist_max = input$atac_blacklist_ratio_max,
+          nucleosome_max = input$atac_nucleosome_signal_max,
+          tss_min = input$atac_tss_enrichment_min,
+        )
+
+        seu_atac <- RunTFIDF(seu_atac)
+        seu_atac <- FindTopFeatures(seu_atac, min.cutoff = 'q0')
+        seu_atac <- RunSVD(seu_atac)
+
+        atac_dims <- seq(input$single_umap_pca_dims[1], input$single_umap_pca_dims[2])
+        atac_tsne_dims <- seq(input$single_tsne_pca_dims[1], input$single_tsne_pca_dims[2])
+        atac_npcs <- 50
+
+        kmeans_res <- ensure_kmeans_clusters(
+          seu_atac,
+          k = 5,
+          res = 0.5,
+          dims = 2:30,
+          dslt = state$dslt,
+          assays = "ATAC",
+          level = "single cell"
+        )
+        seu_atac <- kmeans_res$seu
+        state$dslt <- kmeans_res$dslt
+
+        atac_umap_res <- ensure_umap(seu_atac, input$single_umap_svd_dims, dslt = state$dslt, assays = "ATAC", level = "single cell")
+        seu_atac <- atac_umap_res$seu
+        state$dslt <- atac_umap_res$dslt
+
+        atac_tsne_res <- ensure_tsne(seu_atac, input$single_tsne_svd_dims, dslt = state$dslt, assays = "ATAC", level = "single cell")
+        seu_atac <- atac_tsne_res$seu
+        state$dslt <- atac_tsne_res$dslt
+
+        # 生成QC图
+        state$qc$atac_density <- plot_tss_density_scatter(seu_atac)
+        state$qc$atac_fragment <- plot_fragment_histogram(seu_atac)
+        state$qc$atac_violin <- plot_atac_qc_violins(
+          seu_atac,
+          ncount_min = input$atac_peak_fragments_min,
+          ncount_max = input$atac_peak_fragments_max,
+          pct_reads_min = input$atac_pct_reads_peaks_min,
+          tss_min = input$atac_tss_enrichment_min,
+          nucleosome_max = input$atac_nucleosome_signal_max,
+          blacklist_max = input$atac_blacklist_ratio_max / 100
+        )
+        state$seurat$sc_atac <- seu_atac
+        atac_detail <- "ATAC QC complete"
+      }
+      incProgress(0.25, detail = atac_detail)
+
+      # Mapping to lineage level -----------------------------------------
+      lineage_detail <- "Lineage mapping skipped (missing datasets)"
+      lineage_rna_mapped <- FALSE
+      lineage_atac_mapped <- FALSE
+      if (!is.null(state$mapping$rna) && !is.null(state$seurat$sc_rna)) {
+        pb_rna <- lineage_map_seurat_rna(
+          se = state$seurat$sc_rna,
+          bc = state$mapping$rna,
+          dslt = state$dslt,
+          assay = "RNA",
+          key = "rna"
+        )
+        lineage_dims <- seq(input$lineage_umap_pca_dims[1], input$lineage_umap_pca_dims[2])
+        lineage_tsne_dims <- seq(input$lineage_tsne_pca_dims[1], input$lineage_tsne_pca_dims[2])
+        lineage_npcs <- max(c(lineage_dims, lineage_tsne_dims))
+
+        pca_res <- ensure_pca(pb_rna, dslt = state$dslt, npcs = lineage_npcs, assays = "RNA", level = "lineage")
+        pb_rna <- pca_res$seu
+        state$dslt <- pca_res$dslt
+
+        kmeans_res <- ensure_kmeans_clusters(
+          pb_rna,
+          k = 5,
+          res = 0.5,
+          dims = 1:30,
+          dslt = state$dslt,
+          assays = "RNA",
+          level = "lineage"
+        )
+        pb_rna <- kmeans_res$seu
+        state$dslt <- kmeans_res$dslt
+
+        umap_res <- ensure_umap(pb_rna, input$lineage_umap_pca_dims, dslt = state$dslt, assays = "RNA", level = "lineage")
+        pb_rna <- umap_res$seu
+        state$dslt <- umap_res$dslt
+
+        tsne_res <- ensure_tsne(pb_rna, input$lineage_tsne_pca_dims, dslt = state$dslt, assays = "RNA", level = "lineage")
+        pb_rna <- tsne_res$seu
+        state$dslt <- tsne_res$dslt
+        state$seurat$pb_rna <- pb_rna
+        state$lineage_cell_counts <- state$dslt[["assays"]][["rna_map"]]
+        lineage_rna_mapped <- TRUE
+      }
+
+      if (!is.null(state$mapping$atac) && !is.null(state$seurat$sc_atac)) {
+        # 使用lineage_map_seurat_atac函数映射ATAC数据
+        pb_atac <- lineage_map_seurat_atac(
+          se = state$seurat$sc_atac,
+          bc = state$mapping$atac,
+          dslt = state$dslt,
+          assay = "peaks",
+          key = "atac"
+        )
+
+        atac_dims <- seq(input$lineage_umap_pca_dims[1], input$lineage_umap_pca_dims[2])
+        atac_tsne_dims <- seq(input$lineage_tsne_pca_dims[1], input$lineage_tsne_pca_dims[2])
+        atac_npcs <- 50
+
+        pca_res <- ensure_pca(pb_atac, dslt = state$dslt, npcs = atac_npcs, assays = "ATAC", level = "lineage")
+        pb_atac <- pca_res$seu
+        state$dslt <- pca_res$dslt
+
+        kmeans_res <- ensure_kmeans_clusters(
+          pb_atac,
+          k = 5,
+          res = 0.5,
+          dims = 2:30,
+          dslt = state$dslt,
+          assays = "ATAC",
+          level = "lineage"
+        )
+        pb_atac <- kmeans_res$seu
+        state$dslt <- kmeans_res$dslt
+
+        # UMAP降维
+        umap_res <- ensure_umap(pb_atac, input$lineage_umap_svd_dims, dslt = state$dslt, assays = "ATAC", level = "lineage")
+        pb_atac <- umap_res$seu
+        state$dslt <- umap_res$dslt
+
+        # t-SNE降维
+        tsne_res <- ensure_tsne(pb_atac, input$lineage_tsne_svd_dims, dslt = state$dslt, assays = "ATAC", level = "lineage")
+        pb_atac <- tsne_res$seu
+        state$dslt <- tsne_res$dslt
+
+        state$seurat$pb_atac <- pb_atac
+        showNotification("ATAC data successfully mapped to lineage level", type = "message")
+        lineage_atac_mapped <- TRUE
+      }
+
+      if (lineage_rna_mapped && lineage_atac_mapped) {
+        lineage_detail <- "Lineage mapping (RNA & ATAC) complete"
+      } else if (lineage_rna_mapped) {
+        lineage_detail <- "Lineage mapping (RNA) complete"
+      } else if (lineage_atac_mapped) {
+        lineage_detail <- "Lineage mapping (ATAC) complete"
+      }
+      incProgress(0.25, detail = lineage_detail)
+
+      # Store single cell drug values if mapping available ----------------
+      # 只有在成功映射后才生成并更新single_drug_values
+      drug_mapping_detail <- "Single-cell drug mapping skipped (missing lineage mapping)"
+      if (!is.null(state$mapping$rna)) {
+        mapping_success <- tryCatch({
+          state$dslt <- map_lineage_to_single_cell(state$dslt, state$mapping$rna)
+          TRUE
+        }, error = function(e) {
+          showNotification(paste("Failed to map lineage to single-cell:", e$message), type = "warning")
+          FALSE
+        })
+
+        if (mapping_success) {
+          state$single_drug_values <- state$dslt[["assays"]][["single_cell"]]
+          # 更新single-cell drug选择器
+          drug_choices_single <- extract_drug_choices(state$single_drug_values)
+          updatePickerInput(session, "single_drug_select", choices = drug_choices_single)
+          single_dataset_choices <- names(state$single_drug_values)
+          if (length(single_dataset_choices)) {
+            updateSelectInput(session, "single_rds_object_select", choices = single_dataset_choices, selected = single_dataset_choices[1])
+          }
+          showNotification("Single-cell drug response data successfully generated from lineage mapping.", type = "message")
+          drug_mapping_detail <- "Single-cell drug mapping complete"
+        } else {
+          drug_mapping_detail <- "Single-cell drug mapping failed"
+        }
+      }
+      incProgress(0.25, detail = drug_mapping_detail)
+
+      state$qc_applied <- TRUE
+      output$qc_settings_status <- renderText("QC settings applied successfully!")
+    })
   })
-
   # -----------------------------------------------------------------------
   # QC plots --------------------------------------------------------------
   # -----------------------------------------------------------------------
