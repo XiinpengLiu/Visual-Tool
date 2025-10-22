@@ -10,6 +10,7 @@ source("https://raw.githubusercontent.com/YevhenAkimov/general_purpose_R/main/ge
 source("https://raw.githubusercontent.com/YevhenAkimov/graphics-R/main/colors.R")
 
 options(shiny.maxRequestSize = 10240 * 1024^2) # 1000 MB
+options(future.globals.maxSize = 2 * 1024^3)  # 2 GB
 
 #------------------------------------------------seurat object
 # ATAC-seq
