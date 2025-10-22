@@ -421,12 +421,18 @@ ensure_clusters <- function(seu, dslt = NULL, res = 0.8, dims = 1:30, assays = "
   reduction <- get_dimensional_reduction(assays)
   graph_name <- paste0(DefaultAssay(seu), "_snn")
   if (!graph_name %in% names(seu@graphs) || !"seurat_clusters" %in% colnames(seu@meta.data)) {
-    seu <- run_neighbors_and_clusters(seu,
-      res = res,
+    assay_name <- if (!is.null(assays)) toupper(assays) else toupper(assays)
+    cluster_args <- list(
+      seu = seu,
       dimsl = dims_seq[1],
       dimsh = dims_seq[length(dims_seq)],
-      reduction = reduction
+      reduction = reduction,
+      assays = assays
     )
+    if (assay_name != "ATAC") {
+      cluster_args$res <- res
+    }
+    seu <- do.call(run_neighbors_and_clusters, cluster_args)
   }
   if (!is.null(dslt) && "seurat_clusters" %in% colnames(seu@meta.data)) {
     dslt <- add_clusters_to_dslt(dslt, seu, assays = assays, level = level)
@@ -945,7 +951,7 @@ server <- function(input, output, session) {
       seu_atac <- atac_pca_res$seu
       state$dslt <- atac_pca_res$dslt
 
-      atac_cluster_res <- ensure_clusters(seu_atac, dslt = state$dslt, res = 0.8, dims = 1:30, assays = "ATAC", level = "single cell")
+      atac_cluster_res <- ensure_clusters(seu_atac, dslt = state$dslt, dims = 2:30, assays = "ATAC", level = "single cell")
       seu_atac <- atac_cluster_res$seu
       state$dslt <- atac_cluster_res$dslt
 
@@ -1023,7 +1029,7 @@ server <- function(input, output, session) {
       state$dslt <- pca_res$dslt
 
       # 聚类分析
-      cluster_res <- ensure_clusters(pb_atac, dslt = state$dslt, res = 0.8, dims = 1:30, assays = "ATAC", level = "lineage")
+      cluster_res <- ensure_clusters(pb_atac, dslt = state$dslt, dims = 2:30, assays = "ATAC", level = "lineage")
       pb_atac <- cluster_res$seu
       state$dslt <- cluster_res$dslt
 

@@ -740,7 +740,7 @@ update_dslt_embedding <- function(dslt, assays, level, name, embedding) {
 #' @return 列表,包含更新后的Seurat对象和(可选)更新的dslt对象
 #' @export
 run_pca <- function(seu, dslt = NULL, npcs = 50, assays = "RNA", level = "single cell", verbose = FALSE) {
-  seu <- RunPCA(seu, npcs = npcs, verbose = verbose)
+  seu <- RunPCA(seu, npcs = npcs)
   dslt <- update_dslt_embedding(dslt, assays, level, "pca", Embeddings(seu, "pca"))
   list(seu = seu, dslt = dslt)
 }
@@ -786,15 +786,30 @@ run_tsne <- function(seu, dslt = NULL, dimsl = 1, dimsh = 30, assays = "RNA", le
 #' 运行FindNeighbors和FindClusters
 #'
 #' @param seu Seurat对象
-#' @param res 聚类分辨率参数
+#' @param res 聚类分辨率参数(仅适用于RNA等需要设置分辨率的assay)
 #' @param dimsl PCA维度起始值,默认1
 #' @param dimsh PCA维度结束值,默认30
 #'
 #' @return 包含邻居图和聚类结果的Seurat对象
 #' @export
-run_neighbors_and_clusters <- function(seu, res, dimsl = 1, dimsh = 30, reduction = "pca") {
+run_neighbors_and_clusters <- function(seu, res = NULL, dimsl = 1, dimsh = 30, reduction = "pca", assays = NULL) {
   seu <- FindNeighbors(seu, dims = dimsl:dimsh, reduction = reduction)
-  seu <- FindClusters(seu, resolution = res)
+  assay_name <- if (!is.null(assays)) {
+    toupper(assays)
+  } else {
+    toupper(assays)
+  }
+
+  if (assay_name == "ATAC") {
+    seu <- FindClusters(seu, verbose = FALSE, algorithm = 3)
+  } else {
+    resolution <- if (!is.null(res)) {
+      res
+    } else {
+      0.8
+    }
+    seu <- FindClusters(seu, resolution = resolution)
+  }
   seu
 }
 
