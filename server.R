@@ -961,15 +961,6 @@ server <- function(input, output, session) {
         if (!is.null(suffix)) {
           seu <- tryCatch(filter_cells_by_suffix(seu, suffix = suffix), error = function(e) seu)
         }
-        seu <- filter_rna_qc(
-          seu,
-          min_features = input$rna_nfeature_min,
-          max_features = input$rna_nfeature_max,
-          min_counts = input$rna_ncount_min,
-          max_counts = input$rna_ncount_max,
-          max_percent_mt = input$rna_percent_mt_max,
-          verbose = FALSE
-        )
 
         # 生成QC图
         state$qc$rna_violin <- plot_rna_qc_violin(
@@ -979,6 +970,16 @@ server <- function(input, output, session) {
           max_percent_mt = input$rna_percent_mt_max
         )
         state$qc$rna_scatter <- plot_rna_qc_scatter(seu)
+
+        seu <- filter_rna_qc(
+          seu,
+          min_features = input$rna_nfeature_min,
+          max_features = input$rna_nfeature_max,
+          min_counts = input$rna_ncount_min,
+          max_counts = input$rna_ncount_max,
+          max_percent_mt = input$rna_percent_mt_max,
+          verbose = FALSE
+        )
 
         # SCTransform标准化 (在PCA之前)
         seu <- SCTransform(seu, verbose = FALSE)
@@ -1028,6 +1029,21 @@ server <- function(input, output, session) {
         seu_atac <- calculate_nucleosome_signal(seu_atac)
         seu_atac <- calculate_tss_enrichment(seu_atac)
         seu_atac <- calculate_atac_qc_metrics(seu_atac)
+
+        # 生成QC图
+        state$qc$atac_density <- plot_tss_density_scatter(seu_atac)
+        state$qc$atac_fragment <- plot_fragment_histogram(seu_atac)
+        state$qc$atac_violin <- plot_atac_qc_violins(
+          seu_atac,
+          ncount_min = input$atac_peak_fragments_min,
+          ncount_max = input$atac_peak_fragments_max,
+          pct_reads_min = input$atac_pct_reads_peaks_min,
+          tss_min = input$atac_tss_enrichment_min,
+          nucleosome_max = input$atac_nucleosome_signal_max,
+          blacklist_max = input$atac_blacklist_ratio_max / 100
+        )
+        state$seurat$sc_atac <- seu_atac
+        
         seu_atac <- filter_atac_cells(
           seu_atac,
           ncount_min = input$atac_peak_fragments_min,
@@ -1065,20 +1081,6 @@ server <- function(input, output, session) {
         atac_tsne_res <- ensure_tsne(seu_atac, input$single_tsne_svd_dims, dslt = state$dslt, assays = "ATAC", level = "single cell")
         seu_atac <- atac_tsne_res$seu
         state$dslt <- atac_tsne_res$dslt
-
-        # 生成QC图
-        state$qc$atac_density <- plot_tss_density_scatter(seu_atac)
-        state$qc$atac_fragment <- plot_fragment_histogram(seu_atac)
-        state$qc$atac_violin <- plot_atac_qc_violins(
-          seu_atac,
-          ncount_min = input$atac_peak_fragments_min,
-          ncount_max = input$atac_peak_fragments_max,
-          pct_reads_min = input$atac_pct_reads_peaks_min,
-          tss_min = input$atac_tss_enrichment_min,
-          nucleosome_max = input$atac_nucleosome_signal_max,
-          blacklist_max = input$atac_blacklist_ratio_max / 100
-        )
-        state$seurat$sc_atac <- seu_atac
         atac_detail <- "ATAC QC complete"
       }
       incProgress(0.25, detail = atac_detail)
