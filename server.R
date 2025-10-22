@@ -625,7 +625,18 @@ server <- function(input, output, session) {
         # Update dataset selection
         dataset_choices <- names(state$lineage_drug_values)
         if (length(dataset_choices)) {
-          updateSelectInput(session, "lineage_rds_object_select", choices = dataset_choices, selected = dataset_choices[1])
+          previous_selection <- isolate(input$lineage_rds_object_select)
+          default_selection <- if (!is.null(previous_selection) && previous_selection %in% dataset_choices) {
+            previous_selection
+          } else {
+            dataset_choices[1]
+          }
+          updatePickerInput(session, "lineage_rds_object_select",
+            choices = dataset_choices,
+            selected = default_selection
+          )
+        } else {
+          updatePickerInput(session, "lineage_rds_object_select", choices = character(0))
         }
         
         incProgress(0.3, detail = "Complete")
@@ -898,7 +909,17 @@ server <- function(input, output, session) {
         # Update dataset choices
         dataset_choices <- names(state$lineage_drug_values)
         if (length(dataset_choices)) {
-          updateSelectInput(session, "lineage_rds_object_select", choices = dataset_choices, selected = dataset_choices[1])
+          default_selection <- tail(denoised_names, 1)
+          if (!length(default_selection)) {
+            default_selection <- isolate(input$lineage_rds_object_select)
+          }
+          if (!length(default_selection) || !(default_selection %in% dataset_choices)) {
+            default_selection <- dataset_choices[length(dataset_choices)]
+          }
+          updatePickerInput(session, "lineage_rds_object_select",
+            choices = dataset_choices,
+            selected = default_selection
+          )
         }
         
         showNotification(
@@ -938,11 +959,11 @@ server <- function(input, output, session) {
     updateNumericInput(session, "rna_ncount_min", value = 500)
     updateNumericInput(session, "rna_ncount_max", value = 30000)
     updateNumericInput(session, "rna_percent_mt_max", value = 20)
-    updateNumericInput(session, "atac_peak_fragments_min", value = 1000)
-    updateNumericInput(session, "atac_peak_fragments_max", value = 100000)
-    updateNumericInput(session, "atac_pct_reads_peaks_min", value = 40)
-    updateNumericInput(session, "atac_blacklist_ratio_max", value = 5)
-    updateNumericInput(session, "atac_nucleosome_signal_max", value = 2)
+    updateNumericInput(session, "atac_peak_fragments_min", value = 2000)
+    updateNumericInput(session, "atac_peak_fragments_max", value = 30000)
+    updateNumericInput(session, "atac_pct_reads_peaks_min", value = 20)
+    updateNumericInput(session, "atac_blacklist_ratio_max", value = 0.02)
+    updateNumericInput(session, "atac_nucleosome_signal_max", value = 4)
     updateNumericInput(session, "atac_tss_enrichment_min", value = 2)
     output$qc_settings_status <- renderText("QC settings reset to default values!")
   })
@@ -1040,10 +1061,16 @@ server <- function(input, output, session) {
           pct_reads_min = input$atac_pct_reads_peaks_min,
           tss_min = input$atac_tss_enrichment_min,
           nucleosome_max = input$atac_nucleosome_signal_max,
-          blacklist_max = input$atac_blacklist_ratio_max / 100
+          blacklist_max = input$atac_blacklist_ratio_max
         )
         state$seurat$sc_atac <- seu_atac
-        
+
+        output$qc_atac_depth_correlation <- renderPlot({
+          req(state$seurat$sc_atac)
+          seu <- state$seurat$sc_atac
+          DepthCor(seu)
+        })
+
         seu_atac <- filter_atac_cells(
           seu_atac,
           ncount_min = input$atac_peak_fragments_min,
@@ -1051,7 +1078,7 @@ server <- function(input, output, session) {
           pct_reads_min = input$atac_pct_reads_peaks_min,
           blacklist_max = input$atac_blacklist_ratio_max,
           nucleosome_max = input$atac_nucleosome_signal_max,
-          tss_min = input$atac_tss_enrichment_min,
+          tss_min = input$atac_tss_enrichment_min
         )
 
         seu_atac <- RunTFIDF(seu_atac)
@@ -1196,13 +1223,27 @@ server <- function(input, output, session) {
         })
 
         if (mapping_success) {
+          previous_single_choices <- names(state$single_drug_values)
+          if (is.null(previous_single_choices)) previous_single_choices <- character()
           state$single_drug_values <- state$dslt[["assays"]][["single_cell"]]
           # 更新single-cell drug选择器
           drug_choices_single <- extract_drug_choices(state$single_drug_values)
           updatePickerInput(session, "single_drug_select", choices = drug_choices_single)
           single_dataset_choices <- names(state$single_drug_values)
           if (length(single_dataset_choices)) {
-            updateSelectInput(session, "single_rds_object_select", choices = single_dataset_choices, selected = single_dataset_choices[1])
+            new_tables <- setdiff(single_dataset_choices, previous_single_choices)
+            default_selection <- if (length(new_tables)) {
+              new_tables[length(new_tables)]
+            } else {
+              isolate(input$single_rds_object_select)
+            }
+            if (!length(default_selection) || !(default_selection %in% single_dataset_choices)) {
+              default_selection <- single_dataset_choices[length(single_dataset_choices)]
+            }
+            updatePickerInput(session, "single_rds_object_select",
+              choices = single_dataset_choices,
+              selected = default_selection
+            )
           }
           showNotification("Single-cell drug response data successfully generated from lineage mapping.", type = "message")
           drug_mapping_detail <- "Single-cell drug mapping complete"
@@ -1247,31 +1288,6 @@ server <- function(input, output, session) {
   output$qc_atac_QC <- renderPlot({
     req(state$qc$atac_violin)
     state$qc$atac_violin
-  })
-
-  output$qc_atac_depth_correlation <- renderPlot({
-    req(state$seurat$sc_atac)
-    seu <- state$seurat$sc_atac
-    ggplot(seu@meta.data, aes(x = nCount_peaks, y = peak_region_fragments)) +
-      geom_point(alpha = 0.4) +
-      geom_smooth(method = "lm", se = FALSE, colour = "red") +
-      theme_minimal() +
-      labs(x = "nCount_peaks", y = "Peak region fragments")
-  })
-
-  output$integration_plot <- renderPlot({
-    req(state$seurat$sc_rna, state$seurat$sc_atac)
-    umap_rna <- Embeddings(state$seurat$sc_rna, "umap")
-    umap_atac <- Embeddings(state$seurat$sc_atac, "umap")
-    df_rna <- data.frame(umap_rna[, 1:2], assay = "RNA")
-    df_atac <- data.frame(umap_atac[, 1:2], assay = "ATAC")
-    colnames(df_rna) <- colnames(df_atac) <- c("dim1", "dim2", "assay")
-    df <- rbind(df_rna, df_atac)
-    ggplot(df, aes(x = dim1, y = dim2, colour = assay)) +
-      geom_point(alpha = 0.4, size = 0.8) +
-      theme_minimal() +
-      coord_equal() +
-      labs(x = "UMAP1", y = "UMAP2", colour = "Assay")
   })
 
   # -----------------------------------------------------------------------

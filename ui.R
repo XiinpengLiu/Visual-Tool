@@ -442,13 +442,11 @@ ui <- dashboardPage(
                 box(title = "FragmentHistogram", width = 6, plotOutput("qc_atac_Fragment"))
               ),
               fluidRow(
-                box(title = "QC metrics as a violin plot", width = 6, plotOutput("qc_atac_QC")),
                 box(title = "Sequencing Depth Correlation", width = 6, plotOutput("qc_atac_depth_correlation"))
+              ),
+              fluidRow(
+                box(title = "QC metrics as a violin plot", width = 12, plotOutput("qc_atac_QC"))
               )
-            ),
-            tabPanel("Data Integration",
-              h3("scRNA and scATAC Integration"),
-              plotOutput("integration_plot")
             )
           )
         )
@@ -509,8 +507,16 @@ ui <- dashboardPage(
               # Drug Response/Growth Rate Selection
               conditionalPanel(
                 condition = "input.lineage_color_by == 'drug_response'",
-                selectInput("lineage_rds_object_select", "Select dataset",
-                  choices = c("Long-term growth rate" = "cGR", "Drug resistance score" = "AUC")),
+                pickerInput(
+                  "lineage_rds_object_select",
+                  "Select dataset",
+                  choices = NULL,
+                  multiple = FALSE,
+                  options = pickerOptions(
+                    liveSearch = TRUE,
+                    noneSelectedText = "Awaiting lineage assays"
+                  )
+                ),
                 pickerInput(
                   "lineage_drug_select",
                   "Select drugs",
@@ -541,11 +547,11 @@ ui <- dashboardPage(
               ),
               conditionalPanel(
                 condition = "input.lineage_track_mode == 'gene'",
-                textInput("lineage_gene_input", "Enter gene symbol", "e.g., SOX2")
+                textInput("lineage_gene_input", "Enter gene symbol", value = "MYC")
               ),
               conditionalPanel(
                 condition = "input.lineage_track_mode == 'region'",
-                textInput("lineage_atac_region_input", "Enter chromatin region", "e.g., chr1:12345-23456")
+                textInput("lineage_atac_region_input", "Enter chromatin region", value = "chr1 183993-184842")
               )
 
             )
@@ -633,8 +639,16 @@ ui <- dashboardPage(
               # Drug Response/Growth Rate Selection
               conditionalPanel(
                 condition = "input.single_color_by == 'drug_response'",
-                selectInput("single_rds_object_select", "Select dataset",
-                  choices = c("Long-term growth rate" = "cGR", "Drug resistance score" = "AUC")),
+                pickerInput(
+                  "single_rds_object_select",
+                  "Select dataset",
+                  choices = NULL,
+                  multiple = FALSE,
+                  options = pickerOptions(
+                    liveSearch = TRUE,
+                    noneSelectedText = "Awaiting single-cell assays"
+                  )
+                ),
                 pickerInput(
                   "single_drug_select",
                   "Select drugs",
@@ -658,11 +672,11 @@ ui <- dashboardPage(
               ),
               conditionalPanel(
                 condition = "input.single_track_mode == 'gene'",
-                textInput("single_gene_input", "Enter gene symbol", "e.g., SOX2")
+                textInput("single_gene_input", "Enter gene symbol", value = "MYC")
               ),
               conditionalPanel(
                 condition = "input.single_track_mode == 'region'",
-                textInput("single_atac_region_input", "Enter chromatin region", "e.g., chr1:12345-23456")
+                textInput("single_atac_region_input", "Enter chromatin region", value = "chr1 183993-184842")
               )
 
             )
