@@ -976,12 +976,13 @@ server <- function(input, output, session) {
       if (!nzchar(suffix)) suffix <- NULL
 
       # RNA QC -------------------------------------------------------------
-      rna_detail <- "RNA QC skipped (no RNA dataset loaded)"
       if (!is.null(state$seurat$sc_rna_raw)) {
         seu <- state$seurat$sc_rna_raw
+        incProgress(0.05, detail = "Filtering RNA cells by suffix...")
         if (!is.null(suffix)) {
           seu <- tryCatch(filter_cells_by_suffix(seu, suffix = suffix), error = function(e) seu)
         }
+        incProgress(0.1, detail = "Plotting RNA QC metrics...")
 
         # 生成QC图
         state$qc$rna_violin <- plot_rna_qc_violin(
@@ -992,6 +993,7 @@ server <- function(input, output, session) {
         )
         state$qc$rna_scatter <- plot_rna_qc_scatter(seu)
 
+        incProgress(0.15, detail = "Filtering RNA cells...")
         seu <- filter_rna_qc(
           seu,
           min_features = input$rna_nfeature_min,
@@ -1001,11 +1003,12 @@ server <- function(input, output, session) {
           max_percent_mt = input$rna_percent_mt_max,
           verbose = FALSE
         )
+        incProgress(0.25, detail = "Normalizing Single Cell RNA data (SCTransform)...")
 
-        # SCTransform标准化 (在PCA之前)
         seu <- SCTransform(seu, verbose = FALSE)
 
-        # 后续的PCA、聚类等分析
+        incProgress(0.30, detail = "Running RNA PCA, UMAP, t-SNE, and clustering for single cells...")
+
         single_dims <- seq(input$single_umap_pca_dims[1], input$single_umap_pca_dims[2])
         tsne_dims <- seq(input$single_tsne_pca_dims[1], input$single_tsne_pca_dims[2])
         npcs_needed <- 50
@@ -1036,20 +1039,20 @@ server <- function(input, output, session) {
         state$dslt <- tsne_res$dslt
 
         state$seurat$sc_rna <- seu
-        rna_detail <- "RNA QC complete"
       }
-      incProgress(0.25, detail = rna_detail)
 
       # ATAC QC ------------------------------------------------------------
-      atac_detail <- "ATAC QC skipped (no ATAC dataset loaded)"
       if (!is.null(state$seurat$sc_atac_raw)) {
         seu_atac <- state$seurat$sc_atac_raw
+        incProgress(0.32, detail = "Filtering ATAC cells by suffix...")
         if (!is.null(suffix)) {
           seu_atac <- tryCatch(filter_cells_by_suffix(seu_atac, suffix = suffix), error = function(e) seu_atac)
         }
         seu_atac <- calculate_nucleosome_signal(seu_atac)
         seu_atac <- calculate_tss_enrichment(seu_atac)
         seu_atac <- calculate_atac_qc_metrics(seu_atac)
+
+        incProgress(0.35, detail = "Plotting Single Cell ATAC QC metrics...")
 
         # 生成QC图
         state$qc$atac_density <- plot_tss_density_scatter(seu_atac)
@@ -1071,6 +1074,8 @@ server <- function(input, output, session) {
           DepthCor(seu)
         })
 
+        incProgress(0.40, detail = "Filtering ATAC cells...")
+
         seu_atac <- filter_atac_cells(
           seu_atac,
           ncount_min = input$atac_peak_fragments_min,
@@ -1081,9 +1086,13 @@ server <- function(input, output, session) {
           tss_min = input$atac_tss_enrichment_min
         )
 
+        incProgress(0.50, detail = "Normalizing Single Cell ATAC data (TF-IDF)...")
+
         seu_atac <- RunTFIDF(seu_atac)
         seu_atac <- FindTopFeatures(seu_atac, min.cutoff = 'q0')
         seu_atac <- RunSVD(seu_atac)
+
+        incProgress(0.75, detail = "Running ATAC SVD, UMAP, t-SNE, and clustering for single cells...")
 
         atac_dims <- seq(input$single_umap_pca_dims[1], input$single_umap_pca_dims[2])
         atac_tsne_dims <- seq(input$single_tsne_pca_dims[1], input$single_tsne_pca_dims[2])
@@ -1108,15 +1117,13 @@ server <- function(input, output, session) {
         atac_tsne_res <- ensure_tsne(seu_atac, input$single_tsne_svd_dims, dslt = state$dslt, assays = "ATAC", level = "single cell")
         seu_atac <- atac_tsne_res$seu
         state$dslt <- atac_tsne_res$dslt
-        atac_detail <- "ATAC QC complete"
       }
-      incProgress(0.25, detail = atac_detail)
 
       # Mapping to lineage level -----------------------------------------
-      lineage_detail <- "Lineage mapping skipped (missing datasets)"
       lineage_rna_mapped <- FALSE
       lineage_atac_mapped <- FALSE
       if (!is.null(state$mapping$rna) && !is.null(state$seurat$sc_rna)) {
+        incProgress(0.80, detail = "Mapping RNA data to lineage level...")
         pb_rna <- lineage_map_seurat_rna(
           se = state$seurat$sc_rna,
           bc = state$mapping$rna,
@@ -1208,11 +1215,11 @@ server <- function(input, output, session) {
       } else if (lineage_atac_mapped) {
         lineage_detail <- "Lineage mapping (ATAC) complete"
       }
-      incProgress(0.25, detail = lineage_detail)
+      incProgress(0.89, detail = lineage_detail)
 
       # Store single cell drug values if mapping available ----------------
       # 只有在成功映射后才生成并更新single_drug_values
-      drug_mapping_detail <- "Single-cell drug mapping skipped (missing lineage mapping)"
+      incProgress(0.90, detail = "Mapping drug response to single cells...")
       if (!is.null(state$mapping$rna)) {
         mapping_success <- tryCatch({
           state$dslt <- map_lineage_to_single_cell(state$dslt, state$mapping$rna)
@@ -1251,7 +1258,7 @@ server <- function(input, output, session) {
           drug_mapping_detail <- "Single-cell drug mapping failed"
         }
       }
-      incProgress(0.25, detail = drug_mapping_detail)
+      incProgress(1, detail = drug_mapping_detail)
 
       state$qc_applied <- TRUE
       output$qc_settings_status <- renderText("QC settings applied successfully!")
