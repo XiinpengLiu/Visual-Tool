@@ -338,47 +338,98 @@ cluster_palette <- c(
 
 drug_palette <- rev(c('#67001f','#b2182b',"#f4a582",'#fddbc7',"#ffffff",'#d1e5f0','#92c5de','#2166ac','#053061'))
 
-ensure_umap <- function(seu, dims, reduction_name = "umap") {
-  dims <- seq(dims[1], dims[2])
+ensure_pca <- function(seu, dslt = NULL, npcs = 50, assays = "RNA", level = "single cell") {
+  needs_pca <- !"pca" %in% names(Reductions(seu))
+  if (!needs_pca) {
+    existing <- Embeddings(seu, "pca")
+    needs_pca <- ncol(existing) < npcs
+  }
+  if (needs_pca) {
+    res <- run_pca(seu, dslt = dslt, npcs = npcs, assays = assays, level = level)
+    seu <- res$seu
+    dslt <- res$dslt
+  } else if (!is.null(dslt)) {
+    dslt <- update_dslt_embedding(dslt, assays, level, "pca", Embeddings(seu, "pca"))
+  }
+  list(seu = seu, dslt = dslt)
+}
+
+ensure_umap <- function(seu, dims, dslt = NULL, assays = "RNA", level = "single cell", reduction_name = "umap") {
+  dims_seq <- seq(dims[1], dims[2])
+  pca_res <- ensure_pca(seu, dslt = dslt, npcs = max(dims_seq), assays = assays, level = level)
+  seu <- pca_res$seu
+  dslt <- pca_res$dslt
   if (!reduction_name %in% names(Reductions(seu))) {
-    seu <- RunUMAP(seu, dims = dims, reduction.name = reduction_name, verbose = FALSE)
+    res <- run_umap(seu,
+      dslt = dslt,
+      dimsl = dims_seq[1],
+      dimsh = dims_seq[length(dims_seq)],
+      assays = assays,
+      level = level
+    )
+    seu <- res$seu
+    dslt <- res$dslt
+  } else if (!is.null(dslt)) {
+    dslt <- update_dslt_embedding(dslt, assays, level, reduction_name, Embeddings(seu, reduction_name))
   }
-  list(seu = seu, reduction = reduction_name)
+  list(seu = seu, reduction = reduction_name, dslt = dslt)
 }
 
-ensure_tsne <- function(seu, dims, reduction_name = "tsne") {
-  dims <- seq(dims[1], dims[2])
+ensure_tsne <- function(seu, dims, dslt = NULL, assays = "RNA", level = "single cell", reduction_name = "tsne") {
+  dims_seq <- seq(dims[1], dims[2])
+  pca_res <- ensure_pca(seu, dslt = dslt, npcs = max(dims_seq), assays = assays, level = level)
+  seu <- pca_res$seu
+  dslt <- pca_res$dslt
   if (!reduction_name %in% names(Reductions(seu))) {
-    seu <- RunTSNE(seu, dims = dims, reduction.name = reduction_name, verbose = FALSE)
+    res <- run_tsne(seu,
+      dslt = dslt,
+      dimsl = dims_seq[1],
+      dimsh = dims_seq[length(dims_seq)],
+      assays = assays,
+      level = level
+    )
+    seu <- res$seu
+    dslt <- res$dslt
+  } else if (!is.null(dslt)) {
+    dslt <- update_dslt_embedding(dslt, assays, level, reduction_name, Embeddings(seu, reduction_name))
   }
-  list(seu = seu, reduction = reduction_name)
+  list(seu = seu, reduction = reduction_name, dslt = dslt)
 }
 
-ensure_pca <- function(seu, npcs = 50) {
-  if (!"pca" %in% names(Reductions(seu))) {
-    seu <- RunPCA(seu, npcs = npcs, verbose = FALSE)
+ensure_clusters <- function(seu, dslt = NULL, res = 0.8, dims = 1:30, assays = "RNA", level = "single cell") {
+  dims_seq <- seq(dims[1], dims[length(dims)])
+  pca_res <- ensure_pca(seu, dslt = dslt, npcs = max(dims_seq), assays = assays, level = level)
+  seu <- pca_res$seu
+  dslt <- pca_res$dslt
+  if (!"RNA_snn" %in% names(seu@graphs) || !"seurat_clusters" %in% colnames(seu@meta.data)) {
+    seu <- run_neighbors_and_clusters(seu, res = res, dimsl = dims_seq[1], dimsh = dims_seq[length(dims_seq)])
   }
-  seu
+  if (!is.null(dslt) && "seurat_clusters" %in% colnames(seu@meta.data)) {
+    dslt <- add_clusters_to_dslt(dslt, seu, assays = assays, level = level)
+  }
+  list(seu = seu, dslt = dslt)
 }
 
-ensure_clusters <- function(seu, res = 0.8, dims = 1:30) {
-  if (!"RNA_snn" %in% names(seu@graphs)) {
-    seu <- FindNeighbors(seu, dims = dims)
-  }
-  if (!"seurat_clusters" %in% colnames(seu@meta.data)) {
-    seu <- FindClusters(seu, resolution = res)
-  }
-  seu
-}
-
-ensure_kmeans_clusters <- function(seu, k, dims = 1:30) {
+ensure_kmeans_clusters <- function(seu, k, dims = 1:30, dslt = NULL, assays = "RNA", level = "single cell") {
   k <- max(2, as.integer(k))
-  seu <- ensure_pca(seu, max(dims))
+  dims_seq <- seq(dims[1], dims[length(dims)])
+  cluster_res <- ensure_clusters(seu,
+    dslt = dslt,
+    res = 0.8,
+    dims = dims_seq,
+    assays = assays,
+    level = level
+  )
+  seu <- cluster_res$seu
+  dslt <- cluster_res$dslt
   key <- paste0("kmeans", k)
   if (!key %in% colnames(seu@meta.data)) {
-    seu <- run_kmeans_clustering(seu, knum = k, dimsl = dims[1], dimsh = dims[length(dims)])
+    seu <- run_kmeans_clustering(seu, knum = k, dimsl = dims_seq[1], dimsh = dims_seq[length(dims_seq)])
   }
-  list(seu = seu, column = key)
+  if (!is.null(dslt)) {
+    dslt <- add_clusters_to_dslt(dslt, seu, knum = k, assays = assays, level = level)
+  }
+  list(seu = seu, column = key, dslt = dslt)
 }
 
 # -------------------------------------------------------------------------
@@ -786,14 +837,17 @@ server <- function(input, output, session) {
       if (!is.null(suffix)) {
         seu <- tryCatch(filter_cells_by_suffix(seu, suffix = suffix), error = function(e) seu)
       }
-      seu[["percent.mt"]] <- PercentageFeatureSet(seu, pattern = "^MT-")
-      seu <- subset(seu,
-        subset = nFeature_RNA > input$rna_nfeature_min &
-          nFeature_RNA < input$rna_nfeature_max &
-          nCount_RNA > input$rna_ncount_min &
-          nCount_RNA < input$rna_ncount_max &
-          percent.mt < input$rna_percent_mt_max)
+      seu <- filter_rna_qc(
+        seu,
+        min_features = input$rna_nfeature_min,
+        max_features = input$rna_nfeature_max,
+        min_counts = input$rna_ncount_min,
+        max_counts = input$rna_ncount_max,
+        max_percent_mt = input$rna_percent_mt_max,
+        verbose = FALSE
+      )
 
+      # 生成QC图
       state$qc$rna_violin <- plot_rna_qc_violin(
         seu,
         min_features = input$rna_nfeature_min,
@@ -801,12 +855,32 @@ server <- function(input, output, session) {
         max_percent_mt = input$rna_percent_mt_max
       )
       state$qc$rna_scatter <- plot_rna_qc_scatter(seu)
-      seu <- ensure_pca(seu)
+
+      # SCTransform标准化 (在PCA之前)
+      seu <- SCTransform(seu, verbose = FALSE)
+
+      # 后续的PCA、聚类等分析
+      single_dims <- seq(input$single_umap_pca_dims[1], input$single_umap_pca_dims[2])
+      tsne_dims <- seq(input$single_tsne_pca_dims[1], input$single_tsne_pca_dims[2])
+      npcs_needed <- max(c(single_dims, tsne_dims))
+
+      pca_res <- ensure_pca(seu, dslt = state$dslt, npcs = npcs_needed, assays = "RNA", level = "single cell")
+      seu <- pca_res$seu
+      state$dslt <- pca_res$dslt
       state$qc$rna_elbow <- ElbowPlot(seu)
 
-      seu <- ensure_clusters(seu)
-      seu <- ensure_umap(seu, input$single_umap_pca_dims)$seu
-      seu <- ensure_tsne(seu, input$single_tsne_pca_dims)$seu
+      cluster_res <- ensure_clusters(seu, dslt = state$dslt, res = 0.8, dims = 1:30, assays = "RNA", level = "single cell")
+      seu <- cluster_res$seu
+      state$dslt <- cluster_res$dslt
+
+      umap_res <- ensure_umap(seu, input$single_umap_pca_dims, dslt = state$dslt, assays = "RNA", level = "single cell")
+      seu <- umap_res$seu
+      state$dslt <- umap_res$dslt
+
+      tsne_res <- ensure_tsne(seu, input$single_tsne_pca_dims, dslt = state$dslt, assays = "RNA", level = "single cell")
+      seu <- tsne_res$seu
+      state$dslt <- tsne_res$dslt
+
       state$seurat$sc_rna <- seu
     }
 
@@ -827,8 +901,13 @@ server <- function(input, output, session) {
         blacklist_max = input$atac_blacklist_ratio_max,
         nucleosome_max = input$atac_nucleosome_signal_max,
         tss_min = input$atac_tss_enrichment_min,
-        suffix = if (is.null(suffix)) "-1$" else suffix
       )
+      
+      seu_atac <- RunTFIDF(seu_atac)
+      seu_atac <- FindTopFeatures(seu_atac, min.cutoff = 'q0')
+      seu_atac <- RunSVD(seu_atac)
+      
+      # 生成QC图
       state$qc$atac_density <- plot_tss_density_scatter(seu_atac)
       state$qc$atac_fragment <- plot_fragment_histogram(seu_atac)
       state$qc$atac_violin <- plot_atac_qc_violins(
@@ -852,22 +931,64 @@ server <- function(input, output, session) {
         assay = "RNA",
         key = "rna"
       )
-      pb_rna <- ensure_pca(pb_rna)
-      pb_rna <- ensure_clusters(pb_rna)
-      pb_rna <- ensure_umap(pb_rna, input$lineage_umap_pca_dims)$seu
-      pb_rna <- ensure_tsne(pb_rna, input$lineage_tsne_pca_dims)$seu
+      lineage_dims <- seq(input$lineage_umap_pca_dims[1], input$lineage_umap_pca_dims[2])
+      lineage_tsne_dims <- seq(input$lineage_tsne_pca_dims[1], input$lineage_tsne_pca_dims[2])
+      lineage_npcs <- max(c(lineage_dims, lineage_tsne_dims))
+
+      pca_res <- ensure_pca(pb_rna, dslt = state$dslt, npcs = lineage_npcs, assays = "RNA", level = "lineage")
+      pb_rna <- pca_res$seu
+      state$dslt <- pca_res$dslt
+
+      cluster_res <- ensure_clusters(pb_rna, dslt = state$dslt, res = 0.8, dims = 1:30, assays = "RNA", level = "lineage")
+      pb_rna <- cluster_res$seu
+      state$dslt <- cluster_res$dslt
+
+      umap_res <- ensure_umap(pb_rna, input$lineage_umap_pca_dims, dslt = state$dslt, assays = "RNA", level = "lineage")
+      pb_rna <- umap_res$seu
+      state$dslt <- umap_res$dslt
+
+      tsne_res <- ensure_tsne(pb_rna, input$lineage_tsne_pca_dims, dslt = state$dslt, assays = "RNA", level = "lineage")
+      pb_rna <- tsne_res$seu
+      state$dslt <- tsne_res$dslt
       state$seurat$pb_rna <- pb_rna
       state$lineage_cell_counts <- state$dslt[["assays"]][["rna_map"]]
     }
 
     if (!is.null(state$mapping$atac) && !is.null(state$seurat$sc_atac)) {
-      atac_counts <- LayerData(state$seurat$sc_atac, assay = "ATAC", layer = "counts")
-      pb_atac <- CreateSeuratObject(counts = atac_counts)
-      pb_atac <- ensure_pca(pb_atac)
-      pb_atac <- ensure_clusters(pb_atac)
-      pb_atac <- ensure_umap(pb_atac, input$lineage_umap_pca_dims)$seu
-      pb_atac <- ensure_tsne(pb_atac, input$lineage_tsne_pca_dims)$seu
+      # 使用lineage_map_seurat_atac函数映射ATAC数据
+      pb_atac <- lineage_map_seurat_atac(
+        se = state$seurat$sc_atac,
+        bc = state$mapping$atac,
+        dslt = state$dslt,
+        assay = "peaks",
+        key = "atac"
+      )
+
+      atac_dims <- seq(input$lineage_umap_pca_dims[1], input$lineage_umap_pca_dims[2])
+      atac_tsne_dims <- seq(input$lineage_tsne_pca_dims[1], input$lineage_tsne_pca_dims[2])
+      atac_npcs <- max(c(atac_dims, atac_tsne_dims))
+
+      pca_res <- ensure_pca(pb_atac, dslt = state$dslt, npcs = atac_npcs, assays = "ATAC", level = "lineage")
+      pb_atac <- pca_res$seu
+      state$dslt <- pca_res$dslt
+
+      # 聚类分析
+      cluster_res <- ensure_clusters(pb_atac, dslt = state$dslt, res = 0.8, dims = 1:30, assays = "ATAC", level = "lineage")
+      pb_atac <- cluster_res$seu
+      state$dslt <- cluster_res$dslt
+
+      # UMAP降维
+      umap_res <- ensure_umap(pb_atac, input$lineage_umap_pca_dims, dslt = state$dslt, assays = "ATAC", level = "lineage")
+      pb_atac <- umap_res$seu
+      state$dslt <- umap_res$dslt
+
+      # t-SNE降维
+      tsne_res <- ensure_tsne(pb_atac, input$lineage_tsne_pca_dims, dslt = state$dslt, assays = "ATAC", level = "lineage")
+      pb_atac <- tsne_res$seu
+      state$dslt <- tsne_res$dslt
+      
       state$seurat$pb_atac <- pb_atac
+      showNotification("ATAC data successfully mapped to lineage level", type = "message")
     }
 
     # Store single cell drug values if mapping available ----------------
@@ -970,21 +1091,29 @@ server <- function(input, output, session) {
     cluster_col <- "seurat_clusters"
     dims <- seq(1, 30)
 
+    dslt_level <- "lineage"
     if (method == "umap") {
-      res <- ensure_umap(seu, input$lineage_umap_pca_dims)
+      res <- ensure_umap(seu, input$lineage_umap_pca_dims, dslt = state$dslt, assays = "RNA", level = dslt_level)
       seu <- res$seu
+      state$dslt <- res$dslt
       reduction <- res$reduction
     } else if (method == "tsne") {
-      res <- ensure_tsne(seu, input$lineage_tsne_pca_dims)
+      res <- ensure_tsne(seu, input$lineage_tsne_pca_dims, dslt = state$dslt, assays = "RNA", level = dslt_level)
       seu <- res$seu
+      state$dslt <- res$dslt
       reduction <- res$reduction
     } else if (method == "kmeans") {
-      res <- ensure_kmeans_clusters(seu, input$lineage_kmeans_input, dims = dims)
+      res <- ensure_kmeans_clusters(seu, input$lineage_kmeans_input, dims = dims, dslt = state$dslt, assays = "RNA", level = dslt_level)
       seu <- res$seu
+      state$dslt <- res$dslt
       cluster_col <- res$column
     } else {
-      seu <- ensure_pca(seu)
-      seu <- ensure_clusters(seu)
+      pca_res <- ensure_pca(seu, dslt = state$dslt, assays = "RNA", level = dslt_level)
+      seu <- pca_res$seu
+      state$dslt <- pca_res$dslt
+      cluster_res <- ensure_clusters(seu, dslt = state$dslt, assays = "RNA", level = dslt_level, dims = dims)
+      seu <- cluster_res$seu
+      state$dslt <- cluster_res$dslt
       reduction <- "pca"
     }
 
@@ -1002,21 +1131,29 @@ server <- function(input, output, session) {
     cluster_col <- "seurat_clusters"
     dims <- seq(1, 30)
 
+    dslt_level <- "single cell"
     if (method == "umap") {
-      res <- ensure_umap(seu, input$single_umap_pca_dims)
+      res <- ensure_umap(seu, input$single_umap_pca_dims, dslt = state$dslt, assays = "RNA", level = dslt_level)
       seu <- res$seu
+      state$dslt <- res$dslt
       reduction <- res$reduction
     } else if (method == "tsne") {
-      res <- ensure_tsne(seu, input$single_tsne_pca_dims)
+      res <- ensure_tsne(seu, input$single_tsne_pca_dims, dslt = state$dslt, assays = "RNA", level = dslt_level)
       seu <- res$seu
+      state$dslt <- res$dslt
       reduction <- res$reduction
     } else if (method == "kmeans") {
-      res <- ensure_kmeans_clusters(seu, input$single_kmeans_input, dims = dims)
+      res <- ensure_kmeans_clusters(seu, input$single_kmeans_input, dims = dims, dslt = state$dslt, assays = "RNA", level = dslt_level)
       seu <- res$seu
+      state$dslt <- res$dslt
       cluster_col <- res$column
     } else {
-      seu <- ensure_pca(seu)
-      seu <- ensure_clusters(seu)
+      pca_res <- ensure_pca(seu, dslt = state$dslt, assays = "RNA", level = dslt_level)
+      seu <- pca_res$seu
+      state$dslt <- pca_res$dslt
+      cluster_res <- ensure_clusters(seu, dslt = state$dslt, assays = "RNA", level = dslt_level, dims = dims)
+      seu <- cluster_res$seu
+      state$dslt <- cluster_res$dslt
       reduction <- "pca"
     }
 
@@ -1080,7 +1217,8 @@ server <- function(input, output, session) {
   output$lineage_atac_cluster_plot <- renderPlot({
     req(state$seurat$pb_atac)
     seu <- state$seurat$pb_atac
-    seu <- ensure_umap(seu, input$lineage_umap_pca_dims)$seu
+    umap_res <- ensure_umap(seu, input$lineage_umap_pca_dims, dslt = NULL, assays = "ATAC", level = "lineage")
+    seu <- umap_res$seu
     DimPlot(seu, reduction = "umap", group.by = "seurat_clusters", pt.size = 1) + theme_minimal()
   })
 
@@ -1311,7 +1449,8 @@ server <- function(input, output, session) {
 
   output$single_atac_cluster_plot <- renderPlot({
     req(state$seurat$sc_atac)
-    seu <- ensure_umap(state$seurat$sc_atac, input$single_umap_pca_dims)$seu
+    umap_res <- ensure_umap(state$seurat$sc_atac, input$single_umap_pca_dims, dslt = NULL, assays = "ATAC", level = "single cell")
+    seu <- umap_res$seu
     DimPlot(seu, reduction = "umap", group.by = "seurat_clusters", pt.size = 0.6) + theme_minimal()
   })
 
@@ -1473,6 +1612,7 @@ server <- function(input, output, session) {
     content = function(file) {
       device <- switch(input$export_lineage_format, png = png, pdf = pdf, jpeg = jpeg)
       device(file, width = 10, height = 7)
+     
       plots <- list(
         isolate(lineage_cluster_plot_obj()),
         isolate(lineage_knn_plot_obj()),

@@ -116,6 +116,8 @@ create_rna_seurat <- function(h5_file = NULL,
 #' @param se_rna Seurat对象,包含RNA数据
 #' @param min_features 最低基因数阈值,默认200
 #' @param max_features 最高基因数阈值,默认6000
+#' @param min_counts 最低UMI/reads阈值,默认NULL表示不限制
+#' @param max_counts 最高UMI/reads阈值,默认NULL表示不限制
 #' @param max_percent_mt 最高线粒体基因百分比阈值,默认10
 #'
 #' @return patchwork对象,包含三个小提琴图的组合
@@ -202,9 +204,11 @@ plot_rna_qc_scatter <- function(se_rna) {
 #'
 #' @examples
 #' se_rna_filtered <- filter_rna_qc(se_rna, min_features = 200, max_features = 6000, max_percent_mt = 10)
-filter_rna_qc <- function(se_rna, 
-                          min_features = 200, 
-                          max_features = 6000, 
+filter_rna_qc <- function(se_rna,
+                          min_features = 200,
+                          max_features = 6000,
+                          min_counts = NULL,
+                          max_counts = NULL,
                           max_percent_mt = 10,
                           verbose = TRUE) {
   
@@ -218,11 +222,29 @@ filter_rna_qc <- function(se_rna,
     print(paste0('过滤前的细胞数量为：', ncol(se_rna)))
   }
   
-  # 执行质控过滤
-  se_rna <- subset(se_rna, 
-                   subset = nFeature_RNA > min_features & 
-                     nFeature_RNA < max_features & 
-                     percent.mt < max_percent_mt)
+  keep <- rep(TRUE, ncol(se_rna))
+
+  if (!is.null(min_features)) {
+    keep <- keep & !is.na(se_rna$nFeature_RNA) & se_rna$nFeature_RNA > min_features
+  }
+
+  if (!is.null(max_features)) {
+    keep <- keep & !is.na(se_rna$nFeature_RNA) & se_rna$nFeature_RNA < max_features
+  }
+
+  if (!is.null(min_counts)) {
+    keep <- keep & !is.na(se_rna$nCount_RNA) & se_rna$nCount_RNA > min_counts
+  }
+
+  if (!is.null(max_counts)) {
+    keep <- keep & !is.na(se_rna$nCount_RNA) & se_rna$nCount_RNA < max_counts
+  }
+
+  if (!is.null(max_percent_mt)) {
+    keep <- keep & !is.na(se_rna$percent.mt) & se_rna$percent.mt < max_percent_mt
+  }
+
+  se_rna <- subset(se_rna, cells = colnames(se_rna)[keep])
   
   # 打印过滤后细胞数量
   if (verbose) {
@@ -358,7 +380,6 @@ filter_atac_cells <- function(se_atac,
                                blacklist_max = 0.02,
                                nucleosome_max = 4,
                                tss_min = 2,
-                               suffix = "-1$",
                                verbose = TRUE) {
   
   if (verbose) {
@@ -399,17 +420,6 @@ filter_atac_cells <- function(se_atac,
 #' @return 返回一个新的Seurat对象,包含按barcode聚合后的pseudo-bulk数据,
 #'         已经过SCTransform标准化
 #'
-#' @details
-#' 该函数执行以下步骤:
-#' \itemize{
-#'   \item 提取指定assay的counts数据
-#'   \item 将细胞barcode与lineage barcode匹配
-#'   \item 过滤掉没有匹配的细胞
-#'   \item 按lineage barcode聚合细胞数据
-#'   \item 创建映射表,记录每个barcode对应的细胞数量
-#'   \item 对聚合后的数据进行SCTransform标准化
-#' }
-#'
 #' @export
 #'
 #' @examples
@@ -427,6 +437,78 @@ lineage_map_seurat_rna <- function(se, bc, dslt, assay, key){
   pb_rna <- SCTransform(pb_rna, verbose = FALSE)
   pb_rna
 }
+
+#' 将lineage数据映射到single-cell ATAC数据
+#' 将lineage数据映射到Seurat ATAC对象
+#'
+#' 该函数将单细胞ATAC数据与lineage barcode信息关联,并按barcode聚合细胞,
+#' 创建pseudo-bulk数据集用于后续分析
+#'
+#' @param se Seurat对象,包含单细胞ATAC数据
+#' @param bc 数据框,包含barcode映射信息,必须包含'cell_barcode'和'Barcode'列
+#' @param dslt 目标对象,用于存储映射信息
+#' @param assay 要使用的assay名称,默认为"peaks"
+#' @param key 映射结果的键名前缀,将创建名为'key_map'的assay
+#'
+#' @return 返回一个新的Seurat对象,包含按barcode聚合后的pseudo-bulk ATAC数据,
+#'         已经过TF-IDF和SVD标准化
+#'
+#' @export
+#'
+#' @examples
+lineage_map_seurat_atac <- function(se, bc, dslt, assay = "peaks", key){
+  # 提取counts数据
+  m  <- LayerData(se, assay = assay, layer = "counts")
+  
+  # 匹配barcode
+  md <- bc[match(colnames(m), bc$cell_barcode), , drop = FALSE]
+  
+  # 过滤未匹配的细胞
+  keep <- !is.na(md$Barcode)
+  md <- md[keep, , drop = FALSE]
+  m <- m[, keep, drop = FALSE]
+  rownames(md) <- md$cell_barcode
+  
+  # 创建SingleCellExperiment对象并聚合
+  sce <- SingleCellExperiment(list(counts = m), colData = md)
+  pb  <- aggregateData(sce, assay = "counts", by = "Barcode")
+  
+  # 创建映射表
+  map <- transform(md, n_cells = as.integer(table(Barcode)[Barcode]))[, c("Barcode","cell_barcode","n_cells")]
+  dslt[["assays"]][[paste0(key, "_map")]] <- map
+  
+  # 提取聚合后的矩阵
+  mat_atac <- assays(pb)[[1]]
+  
+  # 创建ChromatinAssay对象
+  chrom_assay <- CreateChromatinAssay(
+    counts = mat_atac,
+    sep = c(":", "-"),
+    genome = se@assays[[assay]]@genome,
+    min.cells = 0,
+    min.features = 0
+  )
+  
+  # 创建Seurat对象
+  pb_atac <- CreateSeuratObject(
+    counts = chrom_assay,
+    assay = "peaks"
+  )
+  
+  # 添加基因注释信息
+  annotations <- GetGRangesFromEnsDb(ensdb = EnsDb.Hsapiens.v86)
+  seqlevelsStyle(annotations) <- "UCSC"
+  genome(annotations) <- genome
+  Annotation(pb_atac) <- annotations
+  
+  # ATAC数据标准化: TF-IDF + SVD
+  pb_atac <- RunTFIDF(pb_atac, verbose = FALSE)
+  pb_atac <- FindTopFeatures(pb_atac, min.cutoff = 'q0', verbose = FALSE)
+  pb_atac <- RunSVD(pb_atac, verbose = FALSE)
+  
+  return(pb_atac)
+}
+
 
 
 #' 根据细胞barcode后缀过滤细胞
@@ -631,6 +713,23 @@ runKnnAnalysisAndStore <- function(dslt,
   dslt
 }
 
+update_dslt_embedding <- function(dslt, assays, level, name, embedding) {
+  if (is.null(dslt) || is.null(embedding)) {
+    return(dslt)
+  }
+
+  tryCatch({
+    embeddings <- dslt$embeddings
+    if (is.null(embeddings)) embeddings <- list()
+    if (is.null(embeddings[[assays]])) embeddings[[assays]] <- list()
+    if (is.null(embeddings[[assays]][[level]])) embeddings[[assays]][[level]] <- list()
+    embeddings[[assays]][[level]][[name]] <- embedding
+    dslt$embeddings <- embeddings
+    dslt
+  }, error = function(e) {
+    dslt
+  })
+}
 
 #' 运行PCA降维
 #'
@@ -638,13 +737,12 @@ runKnnAnalysisAndStore <- function(dslt,
 #' @param npcs PCA主成分数量,默认50
 #' @param verbose 是否显示详细信息,默认FALSE
 #'
-#' @return 包含PCA结果的Seurat对象
+#' @return 列表,包含更新后的Seurat对象和(可选)更新的dslt对象
 #' @export
-run_pca <- function(seu, dslt, npcs = 50, assays = "RNA", level = "single cell", verbose = FALSE) {
+run_pca <- function(seu, dslt = NULL, npcs = 50, assays = "RNA", level = "single cell", verbose = FALSE) {
   seu <- RunPCA(seu, npcs = npcs, verbose = verbose)
-  pca_sc <- Embeddings(seu, "pca")
-  dslt[["embeddings"]][[assays]][[level]] <- list(pca = pca_sc)
-  seu
+  dslt <- update_dslt_embedding(dslt, assays, level, "pca", Embeddings(seu, "pca"))
+  list(seu = seu, dslt = dslt)
 }
 
 #' 运行UMAP降维并添加到dslt
@@ -654,13 +752,12 @@ run_pca <- function(seu, dslt, npcs = 50, assays = "RNA", level = "single cell",
 #' @param dimsh PCA维度结束值,默认30
 #' @param verbose 是否显示详细信息,默认FALSE
 #'
-#' @return 包含UMAP结果的Seurat对象
+#' @return 列表,包含更新后的Seurat对象和(可选)更新的dslt对象
 #' @export
-run_umap <- function(seu, dslt, dimsl = 1, dimsh = 30, assays = "RNA", level = "single cell", verbose = FALSE) {
+run_umap <- function(seu, dslt = NULL, dimsl = 1, dimsh = 30, assays = "RNA", level = "single cell", verbose = FALSE) {
   seu <- RunUMAP(seu, dims = dimsl:dimsh, verbose = verbose)
-  umap_sc <- Embeddings(seu, "umap")
-  dslt[["embeddings"]][[assays]][[level]] <- list(umap = umap_sc)
-  seu
+  dslt <- update_dslt_embedding(dslt, assays, level, "umap", Embeddings(seu, "umap"))
+  list(seu = seu, dslt = dslt)
 }
 
 
@@ -671,13 +768,12 @@ run_umap <- function(seu, dslt, dimsl = 1, dimsh = 30, assays = "RNA", level = "
 #' @param dimsh PCA维度结束值,默认30
 #' @param verbose 是否显示详细信息,默认FALSE
 #'
-#' @return 包含TSNE结果的Seurat对象
+#' @return 列表,包含更新后的Seurat对象和(可选)更新的dslt对象
 #' @export
-run_tsne <- function(seu, dslt, dimsl = 1, dimsh = 30, assays = "RNA", level = "single cell", verbose = FALSE) {
+run_tsne <- function(seu, dslt = NULL, dimsl = 1, dimsh = 30, assays = "RNA", level = "single cell", verbose = FALSE) {
   seu <- RunTSNE(seu, dims = dimsl:dimsh, verbose = verbose)
-  tsne_sc <- Embeddings(seu, "tsne")
-  dslt[["embeddings"]][[assays]][[level]] <- list(tsne = tsne_sc)
-  seu
+  dslt <- update_dslt_embedding(dslt, assays, level, "tsne", Embeddings(seu, "tsne"))
+  list(seu = seu, dslt = dslt)
 }
 
 
@@ -724,15 +820,39 @@ run_kmeans_clustering <- function(seu, knum = 5, dimsl = 1, dimsh = 30, nstart =
 #' @return 更新后的dslt对象
 #' @export
 add_clusters_to_dslt <- function(dslt, sc_seu, knum = 5, assays = "RNA", level = "single cell") {
-  if (is.null(dslt[["columnMetadata"]])) dslt[["columnMetadata"]] <- list()
-  
+  colmeta <- dslt$columnMetadata
+  if (is.null(colmeta)) colmeta <- list()
+  if (is.null(colmeta[[assays]])) colmeta[[assays]] <- list()
+
   row_names_sc <- rownames(sc_seu@meta.data)
-  selected_cols_sc <- sc_seu@meta.data[, c(paste0("kmeans", knum), "seurat_clusters")]
-  new_df_sc <- data.frame(row_names_sc, selected_cols_sc)
-  colnames(new_df_sc) <- c("Barcode", "k", "s")
-  
-  dslt[["columnMetadata"]][[assays]][[level]] <- new_df_sc
-  
+  selected_cols_sc <- sc_seu@meta.data[, c(paste0("kmeans", knum), "seurat_clusters"), drop = FALSE]
+  new_df_sc <- data.frame(Barcode = row_names_sc, selected_cols_sc, stringsAsFactors = FALSE)
+  colnames(new_df_sc)[colnames(new_df_sc) == paste0("kmeans", knum)] <- "k"
+  colnames(new_df_sc)[colnames(new_df_sc) == "seurat_clusters"] <- "s"
+
+  existing <- colmeta[[assays]][[level]]
+  if (!is.null(existing)) {
+    if (!"Barcode" %in% colnames(existing)) {
+      existing <- data.frame(Barcode = rownames(existing), existing,
+                             stringsAsFactors = FALSE, check.names = FALSE)
+    }
+    keep_cols <- setdiff(colnames(existing), c("k", "s", "k.new", "s.new"))
+    existing <- existing[, keep_cols, drop = FALSE]
+    merged <- merge(existing, new_df_sc, by = "Barcode", all = TRUE, suffixes = c("", ".new"))
+    if ("k.new" %in% colnames(merged)) {
+      merged$k <- ifelse(is.na(merged$k.new), merged$k, merged$k.new)
+      merged$k.new <- NULL
+    }
+    if ("s.new" %in% colnames(merged)) {
+      merged$s <- ifelse(is.na(merged$s.new), merged$s, merged$s.new)
+      merged$s.new <- NULL
+    }
+    new_df_sc <- merged
+  }
+
+  colmeta[[assays]][[level]] <- new_df_sc
+  dslt$columnMetadata <- colmeta
+
   dslt
 }
 
