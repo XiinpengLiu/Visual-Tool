@@ -228,7 +228,7 @@ ui <- dashboardPage(
                   div(class = "status-text", textOutput("single_cell_atac_fragments_status"))
                 )
               ),
-              
+
               column(width = 4,
                 div(class = "upload-section",
                   h4(icon("link"), "RNA Mapping"),
@@ -243,7 +243,7 @@ ui <- dashboardPage(
                   div(class = "status-text", textOutput("lineage_rna_mapping_status"))
                 )
               ),
-              
+
               column(width = 4,
                 div(class = "upload-section",
                   h4(icon("link"), "ATAC Mapping"),
@@ -259,7 +259,24 @@ ui <- dashboardPage(
                 )
               )
             ),
-            
+
+            fluidRow(
+              column(width = 4,
+                div(class = "upload-section",
+                  h4(icon("table"), "ATAC Metadata"),
+                  fileInput(
+                    "single_cell_atac_metadata_file",
+                    "Metadata CSV",
+                    accept = c(".csv"),
+                    buttonLabel = "Browse...",
+                    placeholder = "No file selected"
+                  ),
+                  helpText("Optional metadata with peak_region_fragments and other metrics."),
+                  div(class = "status-text", textOutput("single_cell_atac_metadata_status"))
+                )
+              )
+            ),
+
             hr(),
             
             fluidRow(

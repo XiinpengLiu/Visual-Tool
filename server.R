@@ -501,7 +501,8 @@ server <- function(input, output, session) {
       integration = NULL
     ),
     qc_applied = FALSE,
-    export_history = data.frame(timestamp = character(), action = character(), stringsAsFactors = FALSE)
+    export_history = data.frame(timestamp = character(), action = character(), stringsAsFactors = FALSE),
+    metadata = list(rna = NULL, atac = NULL)
   )
 
   # -----------------------------------------------------------------------
@@ -549,6 +550,13 @@ server <- function(input, output, session) {
       }
     } else {
       "Awaiting ATAC fragments file."
+    }
+  })
+  output$single_cell_atac_metadata_status <- renderText({
+    if (has_uploaded_files(input$single_cell_atac_metadata_file)) {
+      "ATAC metadata CSV uploaded."
+    } else {
+      "Optional: upload ATAC metadata CSV with cell barcodes as row names."
     }
   })
   output$lineage_rna_mapping_status <- renderText("Optional: upload RNA barcode mapping file.")
@@ -667,15 +675,15 @@ server <- function(input, output, session) {
         if (atac_matrix_provided && atac_fragments_provided) {
           incProgress(0.1, detail = "Reading ATAC matrix files (this may take a while)...")
           atac_counts <- read_10x_from_upload(input$single_cell_atac_matrix_files)
-          
+
           incProgress(0.1, detail = "Processing fragments file...")
           fragments_info <- preserve_fragments_with_index(input$single_cell_atac_fragments_file)
           fragments_path <- fragments_info$fragments
-          
+
           if (is.null(fragments_path)) {
             stop("Fragments file missing from upload.")
           }
-          
+
           incProgress(0.1, detail = "Verifying/generating tabix index...")
           index_ready <- ensure_tabix_index(fragments_path)
           if (!index_ready) {
@@ -685,13 +693,38 @@ server <- function(input, output, session) {
               duration = 10
             )
           }
-          
+
+          atac_metadata <- NULL
+          state$metadata$atac <- NULL
+          if (has_uploaded_files(input$single_cell_atac_metadata_file)) {
+            incProgress(0.05, detail = "Reading ATAC metadata...")
+            atac_metadata <- tryCatch({
+              read.csv(
+                file = input$single_cell_atac_metadata_file$datapath,
+                header = TRUE,
+                row.names = 1,
+                check.names = FALSE,
+                stringsAsFactors = FALSE
+              )
+            }, error = function(e) {
+              showNotification(paste("Failed to read ATAC metadata:", e$message), type = "error", duration = 5)
+              NULL
+            })
+
+            if (!is.null(atac_metadata)) {
+              atac_metadata <- as.data.frame(atac_metadata, stringsAsFactors = FALSE)
+              state$metadata$atac <- atac_metadata
+              showNotification("ATAC metadata loaded successfully", type = "message", duration = 3)
+            }
+          }
+
           incProgress(0.1, detail = "Creating ATAC Seurat object...")
           sc_atac <- create_atac_seurat(
             counts_data = atac_counts,
-            fragments_file = fragments_path
+            fragments_file = fragments_path,
+            metadata = atac_metadata
           )
-          
+
           state$seurat$sc_atac_raw <- sc_atac
           showNotification("ATAC data loaded successfully", type = "message", duration = 3)
         } else if (atac_matrix_provided || atac_fragments_provided) {

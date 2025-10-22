@@ -27,7 +27,8 @@ create_atac_seurat <- function(h5_file = NULL,
                                 fragments_file,
                                 genome = "hg38",
                                 min_cells = 10,
-                                min_features = 200) {
+                                min_features = 200,
+                                metadata = NULL) {
 
   if (!is.null(counts_data)) {
     counts_mat <- counts_data
@@ -44,11 +45,33 @@ create_atac_seurat <- function(h5_file = NULL,
     min.cells = min_cells,
     min.features = min_features
   )
-  
+
+  cell_names <- colnames(chrom_assay)
+
+  if (!is.null(metadata)) {
+    metadata <- as.data.frame(metadata)
+
+    if (is.null(rownames(metadata))) {
+      stop("Metadata must have row names corresponding to cell barcodes.")
+    }
+
+    missing_cells <- setdiff(cell_names, rownames(metadata))
+    if (length(missing_cells) > 0) {
+      warning(
+        "Metadata is missing entries for some cells. Corresponding values will be filled with NA.",
+        call. = FALSE
+      )
+    }
+
+    metadata <- metadata[cell_names, , drop = FALSE]
+    rownames(metadata) <- cell_names
+  }
+
   # 创建Seurat对象
   seurat_obj <- CreateSeuratObject(
     counts = chrom_assay,
-    assay = "peaks"
+    assay = "peaks",
+    meta.data = metadata
   )
   
   # 添加基因注释信息
@@ -307,14 +330,14 @@ plot_tss_density_scatter <- function(se_atac) {
 calculate_atac_qc_metrics <- function(se_atac, blacklist_regions = blacklist_hg38_unified) {
   # 计算 pct_reads_in_peaks比例
   se_atac$pct_reads_in_peaks <- se_atac$peak_region_fragments / se_atac$passed_filters * 100
-  
+
   # 计算黑名单区域比例
   se_atac$blacklist_ratio <- FractionCountsInRegion(
-    object = se_atac, 
+    object = se_atac,
     assay = 'peaks',
     regions = blacklist_regions
   )
-  
+
   return(se_atac)
 }
 
