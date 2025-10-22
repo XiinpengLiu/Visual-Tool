@@ -1068,12 +1068,6 @@ server <- function(input, output, session) {
         )
         state$seurat$sc_atac <- seu_atac
 
-        output$qc_atac_depth_correlation <- renderPlot({
-          req(state$seurat$sc_atac)
-          seu <- state$seurat$sc_atac
-          DepthCor(seu)
-        })
-
         incProgress(0.40, detail = "Filtering ATAC cells...")
 
         seu_atac <- filter_atac_cells(
@@ -1092,7 +1086,13 @@ server <- function(input, output, session) {
         seu_atac <- FindTopFeatures(seu_atac, min.cutoff = 'q0')
         seu_atac <- RunSVD(seu_atac)
 
-        incProgress(0.75, detail = "Running ATAC SVD, UMAP, t-SNE, and clustering for single cells...")
+        output$qc_atac_depth_correlation <- renderPlot({
+          req(state$seurat$sc_atac)
+          seu <- state$seurat$sc_atac
+          DepthCor(seu)
+        })
+
+        incProgress(0.75, detail = "Running ATAC UMAP, t-SNE, and clustering for single cells...")
 
         atac_dims <- seq(input$single_umap_pca_dims[1], input$single_umap_pca_dims[2])
         atac_tsne_dims <- seq(input$single_tsne_pca_dims[1], input$single_tsne_pca_dims[2])
