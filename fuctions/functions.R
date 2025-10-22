@@ -494,13 +494,13 @@ lineage_map_seurat_atac <- function(se, bc, dslt, assay = "peaks", key){
     counts = chrom_assay,
     assay = "peaks"
   )
-  
-  # 添加基因注释信息
+
   annotations <- GetGRangesFromEnsDb(ensdb = EnsDb.Hsapiens.v86)
   seqlevelsStyle(annotations) <- "UCSC"
-  genome(annotations) <- genome
+  genome(annotations) <- "hg38"
   Annotation(pb_atac) <- annotations
-  
+  rm(annotations)
+
   # ATAC数据标准化: TF-IDF + SVD
   pb_atac <- RunTFIDF(pb_atac, verbose = FALSE)
   pb_atac <- FindTopFeatures(pb_atac, min.cutoff = 'q0', verbose = FALSE)
@@ -549,12 +549,22 @@ filter_cells_by_suffix <- function(obj, suffix = "-1$") {
 }
 
 map_lineage_to_single_cell <- function(dslt, mapping, assays = NULL, umi_col = "UMI") {
-  if (is.null(assays)) {
-    assays <- names(dslt[["assays"]][["lineage"]])
-  } else {
-    assays <- intersect(assays_fi, names(dslt[["assays"]]))
+  lineage_assays <- dslt[["assays"]][["lineage"]]
+
+  available_assays <- names(lineage_assays)
+  if (is.null(available_assays)) {
+    available_assays <- character(0)
   }
-  lineage_assays <- dslt[["assays"]][["lineage"]][[assays]]
+
+  if (is.null(assays)) {
+    assays_to_process <- available_assays
+  } else {
+    assays_to_process <- intersect(assays, available_assays)
+  }
+
+  if (!length(assays_to_process)) {
+    return(dslt)
+  }
   
   mapping <- mapping[
     !is.na(mapping[["cell_barcode"]]) & mapping[["cell_barcode"]] != "" &
@@ -571,7 +581,7 @@ map_lineage_to_single_cell <- function(dslt, mapping, assays = NULL, umi_col = "
   )
   names(umi_counts)[3] <- "umi_count"
   
-  single_cell_assays <- lapply(lineage_assays, function(mat) {
+  single_cell_assays <- lapply(lineage_assays[assays_to_process], function(mat) {
     mat <- as.matrix(mat)
     idx <- match(umi_counts[["Barcode"]], rownames(mat))
     keep <- !is.na(idx)
@@ -588,11 +598,14 @@ map_lineage_to_single_cell <- function(dslt, mapping, assays = NULL, umi_col = "
     sweep(summed, 1, wsum_vec, "/")
   })
 
-  dslt[["assays"]] <- list(
-    lineage = lineage_assays,
-    single_cell = single_cell_assays
-  )
-  
+  existing_single_cell <- dslt[["assays"]][["single_cell"]]
+  if (is.null(existing_single_cell)) {
+    existing_single_cell <- list()
+  }
+
+  existing_single_cell[assays_to_process] <- single_cell_assays
+  dslt[["assays"]][["single_cell"]] <- existing_single_cell
+
   dslt
 }
 
