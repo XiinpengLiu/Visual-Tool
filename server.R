@@ -515,30 +515,46 @@ server <- function(input, output, session) {
   }
 
   output$single_cell_upload_status <- renderText({
-    rna_ready <- has_uploaded_files(input$single_cell_rna_matrix_files)
-    atac_ready <- has_uploaded_files(input$single_cell_atac_matrix_files)
+    rna_ready <- has_uploaded_files(input$single_cell_rna_matrix_files) ||
+      has_uploaded_files(input$single_cell_rna_rds_file)
+    atac_ready <- has_uploaded_files(input$single_cell_atac_matrix_files) ||
+      has_uploaded_files(input$single_cell_atac_rds_file)
     if (rna_ready && atac_ready) {
-      "Single-cell RNA and ATAC matrices detected."
+      "Single-cell RNA and ATAC inputs detected."
     } else if (rna_ready) {
-      "Single-cell RNA matrix detected. Upload ATAC inputs if needed."
+      "Single-cell RNA inputs detected. Upload ATAC inputs if needed."
     } else if (atac_ready) {
-      "Single-cell ATAC matrix detected. Upload RNA inputs if needed."
+      "Single-cell ATAC inputs detected. Upload RNA inputs if needed."
     } else {
-      "Awaiting single-cell matrix uploads."
+      "Awaiting single-cell uploads."
     }
   })
   output$single_cell_upload_rna_matrix_status <- renderText({
     if (has_uploaded_files(input$single_cell_rna_matrix_files)) {
       "Single-cell RNA matrix files uploaded."
     } else {
-      "Awaiting RNA matrix files (matrix.mtx, features.tsv, barcodes.tsv)."
+      "Upload RNA matrix files (matrix.mtx, features.tsv, barcodes.tsv) or provide a preprocessed RDS object."
+    }
+  })
+  output$single_cell_rna_rds_status <- renderText({
+    if (has_uploaded_files(input$single_cell_rna_rds_file)) {
+      "Preprocessed single-cell RNA Seurat object uploaded."
+    } else {
+      "Optional: upload a preprocessed single-cell RNA Seurat object (.rds)."
     }
   })
   output$single_cell_upload_atac_matrix_status <- renderText({
     if (has_uploaded_files(input$single_cell_atac_matrix_files)) {
       "Single-cell ATAC matrix files uploaded."
     } else {
-      "Awaiting ATAC matrix files (matrix.mtx, peaks.tsv, barcodes.tsv)."
+      "Upload ATAC matrix files (matrix.mtx, peaks.tsv, barcodes.tsv) or provide a preprocessed RDS object."
+    }
+  })
+  output$single_cell_atac_rds_status <- renderText({
+    if (has_uploaded_files(input$single_cell_atac_rds_file)) {
+      "Preprocessed single-cell ATAC Seurat object uploaded."
+    } else {
+      "Optional: upload a preprocessed single-cell ATAC Seurat object (.rds)."
     }
   })
   output$single_cell_atac_fragments_status <- renderText({
@@ -648,14 +664,34 @@ server <- function(input, output, session) {
         ))
         state$qc_applied <- FALSE
         state$single_drug_values <- NULL
-        
+        state$metadata$atac <- NULL
+
         incProgress(0.05, detail = "Checking RNA files...")
-        
-        # Optional RNA matrices
-        if (!is.null(input$single_cell_rna_matrix_files) && nrow(input$single_cell_rna_matrix_files) > 0) {
+
+        rna_rds_provided <- has_uploaded_files(input$single_cell_rna_rds_file)
+        rna_matrix_provided <- has_uploaded_files(input$single_cell_rna_matrix_files)
+
+        if (rna_rds_provided) {
+          incProgress(0.1, detail = "Reading RNA Seurat object...")
+          sc_rna <- tryCatch({
+            readRDS(input$single_cell_rna_rds_file$datapath)
+          }, error = function(e) {
+            showNotification(paste("Failed to read RNA RDS:", e$message), type = "error", duration = 5)
+            stop(e$message)
+          })
+
+          if (!inherits(sc_rna, "Seurat")) {
+            showNotification("The provided RNA RDS does not contain a Seurat object.", type = "error", duration = 5)
+            stop("Invalid RNA Seurat object")
+          }
+
+          incProgress(0.1, detail = "Validating RNA Seurat object...")
+          state$seurat$sc_rna_raw <- sc_rna
+          showNotification("RNA Seurat object loaded successfully", type = "message", duration = 3)
+        } else if (rna_matrix_provided) {
           incProgress(0.1, detail = "Reading RNA matrix files...")
           rna_counts <- read_10x_from_upload(input$single_cell_rna_matrix_files)
-          
+
           if (!is.null(rna_counts)) {
             incProgress(0.1, detail = "Creating RNA Seurat object...")
             sc_rna <- create_rna_seurat(matrix_data = rna_counts)
@@ -663,17 +699,34 @@ server <- function(input, output, session) {
             showNotification("RNA matrix loaded successfully", type = "message", duration = 3)
           }
         } else {
-          incProgress(0.2, detail = "No RNA files provided, skipping...")
+          incProgress(0.2, detail = "No RNA inputs provided, skipping...")
         }
-        
+
         incProgress(0.05, detail = "Checking ATAC files...")
-        
-        # Optional ATAC matrices
+
+        atac_rds_provided <- has_uploaded_files(input$single_cell_atac_rds_file)
         atac_matrix_provided <- has_uploaded_files(input$single_cell_atac_matrix_files)
         atac_fragments_provided <- has_uploaded_files(input$single_cell_atac_fragments_file) &&
           any(grepl("\\.(tsv|tsv\\.gz)$", tolower(input$single_cell_atac_fragments_file$name)))
-        
-        if (atac_matrix_provided && atac_fragments_provided) {
+
+        if (atac_rds_provided) {
+          incProgress(0.1, detail = "Reading ATAC Seurat object...")
+          sc_atac <- tryCatch({
+            readRDS(input$single_cell_atac_rds_file$datapath)
+          }, error = function(e) {
+            showNotification(paste("Failed to read ATAC RDS:", e$message), type = "error", duration = 5)
+            stop(e$message)
+          })
+
+          if (!inherits(sc_atac, "Seurat")) {
+            showNotification("The provided ATAC RDS does not contain a Seurat object.", type = "error", duration = 5)
+            stop("Invalid ATAC Seurat object")
+          }
+
+          incProgress(0.2, detail = "Validating ATAC Seurat object...")
+          state$seurat$sc_atac_raw <- sc_atac
+          showNotification("ATAC Seurat object loaded successfully", type = "message", duration = 3)
+        } else if (atac_matrix_provided && atac_fragments_provided) {
           incProgress(0.1, detail = "Reading ATAC matrix files (this may take a while)...")
           atac_counts <- read_10x_from_upload(input$single_cell_atac_matrix_files)
 
@@ -696,7 +749,6 @@ server <- function(input, output, session) {
           }
 
           atac_metadata <- NULL
-          state$metadata$atac <- NULL
           if (has_uploaded_files(input$single_cell_atac_metadata_file)) {
             incProgress(0.05, detail = "Reading ATAC metadata...")
             atac_metadata <- tryCatch({
@@ -736,9 +788,9 @@ server <- function(input, output, session) {
             duration = 5
           )
         } else {
-          incProgress(0.4, detail = "No ATAC files provided, skipping...")
+          incProgress(0.4, detail = "No ATAC inputs provided, skipping...")
         }
-        
+
         incProgress(0.05, detail = "Reading mapping files...")
         
         # Mapping files

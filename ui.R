@@ -176,9 +176,24 @@ ui <- dashboardPage(
                 helpText("Upload matrix.mtx(.gz), features.tsv(.gz), barcodes.tsv(.gz), or a single 10x HDF5 file (.h5/.hdf5)."),
                 div(class = "status-text", textOutput("single_cell_upload_rna_matrix_status"))
               ),
-              
+
               hr(),
-              
+
+              div(class = "upload-section",
+                h4(icon("database"), "Preprocessed RNA Object"),
+                fileInput(
+                  "single_cell_rna_rds_file",
+                  "RNA Seurat object (.rds)",
+                  accept = c(".rds", ".RDS"),
+                  buttonLabel = "Browse...",
+                  placeholder = "No file selected"
+                ),
+                helpText("Upload a preprocessed single-cell RNA Seurat object saved as .rds."),
+                div(class = "status-text", textOutput("single_cell_rna_rds_status"))
+              ),
+
+              hr(),
+
               div(class = "upload-section",
                 h4(icon("chart-area"), "Single-cell ATAC Matrix"),
                 fileInput(
@@ -192,9 +207,24 @@ ui <- dashboardPage(
                 helpText("Upload matrix.mtx(.gz), peaks.tsv(.gz), barcodes.tsv(.gz), or a single 10x HDF5 file."),
                 div(class = "status-text", textOutput("single_cell_upload_atac_matrix_status"))
               ),
-              
+
               hr(),
-              
+
+              div(class = "upload-section",
+                h4(icon("layer-group"), "Preprocessed ATAC Object"),
+                fileInput(
+                  "single_cell_atac_rds_file",
+                  "ATAC Seurat object (.rds)",
+                  accept = c(".rds", ".RDS"),
+                  buttonLabel = "Browse...",
+                  placeholder = "No file selected"
+                ),
+                helpText("Upload a preprocessed single-cell ATAC Seurat object saved as .rds."),
+                div(class = "status-text", textOutput("single_cell_atac_rds_status"))
+              ),
+
+              hr(),
+
               div(class = "action-buttons",
                 actionButton("load_supplements", tagList(icon("download"), "Load Supplements"), class = "btn-info btn-block")
               )
