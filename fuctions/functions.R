@@ -745,6 +745,12 @@ run_pca <- function(seu, dslt = NULL, npcs = 50, assays = "RNA", level = "single
   list(seu = seu, dslt = dslt)
 }
 
+run_svd <- function(seu, dslt = NULL, npcs = 50, assays = "ATAC", level = "single cell", verbose = FALSE) {
+  seu <- RunSVD(seu, n = npcs, reduction.name = "lsi", verbose = verbose)
+  dslt <- update_dslt_embedding(dslt, assays, level, "lsi", Embeddings(seu, "lsi"))
+  list(seu = seu, dslt = dslt)
+}
+
 #' 运行UMAP降维并添加到dslt
 #'
 #' @param seu Seurat对象
@@ -754,8 +760,8 @@ run_pca <- function(seu, dslt = NULL, npcs = 50, assays = "RNA", level = "single
 #'
 #' @return 列表,包含更新后的Seurat对象和(可选)更新的dslt对象
 #' @export
-run_umap <- function(seu, dslt = NULL, dimsl = 1, dimsh = 30, assays = "RNA", level = "single cell", verbose = FALSE) {
-  seu <- RunUMAP(seu, dims = dimsl:dimsh, verbose = verbose)
+run_umap <- function(seu, dslt = NULL, dimsl = 1, dimsh = 30, assays = "RNA", level = "single cell", verbose = FALSE, reduction = "pca") {
+  seu <- RunUMAP(seu, dims = dimsl:dimsh, verbose = verbose, reduction = reduction)
   dslt <- update_dslt_embedding(dslt, assays, level, "umap", Embeddings(seu, "umap"))
   list(seu = seu, dslt = dslt)
 }
@@ -770,8 +776,8 @@ run_umap <- function(seu, dslt = NULL, dimsl = 1, dimsh = 30, assays = "RNA", le
 #'
 #' @return 列表,包含更新后的Seurat对象和(可选)更新的dslt对象
 #' @export
-run_tsne <- function(seu, dslt = NULL, dimsl = 1, dimsh = 30, assays = "RNA", level = "single cell", verbose = FALSE) {
-  seu <- RunTSNE(seu, dims = dimsl:dimsh, verbose = verbose)
+run_tsne <- function(seu, dslt = NULL, dimsl = 1, dimsh = 30, assays = "RNA", level = "single cell", verbose = FALSE, reduction = "pca") {
+  seu <- RunTSNE(seu, dims = dimsl:dimsh, verbose = verbose, reduction = reduction)
   dslt <- update_dslt_embedding(dslt, assays, level, "tsne", Embeddings(seu, "tsne"))
   list(seu = seu, dslt = dslt)
 }
@@ -786,8 +792,8 @@ run_tsne <- function(seu, dslt = NULL, dimsl = 1, dimsh = 30, assays = "RNA", le
 #'
 #' @return 包含邻居图和聚类结果的Seurat对象
 #' @export
-run_neighbors_and_clusters <- function(seu, res, dimsl = 1, dimsh = 30) {
-  seu <- FindNeighbors(seu, dims = dimsl:dimsh)
+run_neighbors_and_clusters <- function(seu, res, dimsl = 1, dimsh = 30, reduction = "pca") {
+  seu <- FindNeighbors(seu, dims = dimsl:dimsh, reduction = reduction)
   seu <- FindClusters(seu, resolution = res)
   seu
 }
@@ -802,8 +808,8 @@ run_neighbors_and_clusters <- function(seu, res, dimsl = 1, dimsh = 30) {
 #'
 #' @return 包含kmeans聚类结果的Seurat对象
 #' @export
-run_kmeans_clustering <- function(seu, knum = 5, dimsl = 1, dimsh = 30, nstart = 20) {
-  pc <- Embeddings(seu, "pca")[, dimsl:dimsh]
+run_kmeans_clustering <- function(seu, knum = 5, dimsl = 1, dimsh = 30, nstart = 20, reduction = "pca") {
+  pc <- Embeddings(seu, reduction)[, dimsl:dimsh]
   km <- kmeans(pc, centers = knum, nstart = nstart)
   seu[[paste0("kmeans", knum)]] <- as.factor(km$cluster)
   seu
