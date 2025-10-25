@@ -318,6 +318,44 @@ get_dslt_column_metadata_safe <- function(dslt, assay_name, field) {
   tryCatch(dslt$getColumnMetadata(assay_name, field), error = function(e) NULL)
 }
 
+ensure_archetype_metadata <- function(state, assay_name, level = c("lineage", "single_cell")) {
+  level <- match.arg(level)
+  if (is.null(state$dslt) || !nzchar(assay_name)) {
+    return(NULL)
+  }
+
+  arch <- get_dslt_column_metadata_safe(state$dslt, assay_name, "archetypes")
+  if (!is.null(arch)) {
+    return(arch)
+  }
+
+  dslt_result <- tryCatch(
+    performArchetypeAndAnnotate(state$dslt, assay_name, levels = level),
+    error = function(e) {
+      showNotification(paste("Archetype analysis failed:", e$message), type = "error")
+      NULL
+    }
+  )
+
+  if (!is.null(dslt_result)) {
+    if (inherits(dslt_result, "DatasetLT") ||
+        (is.list(dslt_result) && all(c("assays", "embeddings") %in% names(dslt_result)))) {
+      state$dslt <- dslt_result
+    } else if (is.matrix(dslt_result) || is.data.frame(dslt_result)) {
+      arch <- as.matrix(dslt_result)
+      level_key <- if (identical(level, "lineage")) "lineage" else "single_cell"
+      if (is.null(state$dslt[["columnMetadata"]])) state$dslt[["columnMetadata"]] <- list()
+      if (is.null(state$dslt[["columnMetadata"]][[level_key]])) state$dslt[["columnMetadata"]][[level_key]] <- list()
+      if (is.null(state$dslt[["columnMetadata"]][[level_key]][[assay_name]])) {
+        state$dslt[["columnMetadata"]][[level_key]][[assay_name]] <- list()
+      }
+      state$dslt[["columnMetadata"]][[level_key]][[assay_name]][["archetypes"]] <- arch
+    }
+  }
+
+  get_dslt_column_metadata_safe(state$dslt, assay_name, "archetypes")
+}
+
 ensure_knn_embeddings <- function(state, assay_name, level = c("lineage", "single_cell")) {
   if (is.null(state$dslt) || !nzchar(assay_name)) return(list(coords = NULL, clusters = NULL))
   level <- match.arg(level)
@@ -1282,10 +1320,6 @@ server <- function(input, output, session) {
       incProgress(1, detail = drug_mapping_detail)
 
       state$qc_applied <- TRUE
-      output$qc_settings_status <- renderText("QC settings applied successfully!")
-      # ... [所有现有的 QC 和映射代码，例如 state$single_drug_values <- ... ] ...
-      
-      # --- 您要添加的代码开始 ---
       
       # 1. 尝试保存对象
       tryCatch({
@@ -1548,7 +1582,6 @@ server <- function(input, output, session) {
     req(state$dslt, input$lineage_rds_object_select, input$lineage_bubble_mode)
     assay_name <- input$lineage_rds_object_select
     if (!nzchar(assay_name)) return(NULL)
-    cell_line <- assay_name
     if (input$lineage_bubble_mode == "cluster") {
       res <- ensure_knn_embeddings(state, assay_name, level = "lineage")
       mat <- get_dslt_assay_safe(state$dslt, "lineage", assay_name)
@@ -1594,7 +1627,7 @@ server <- function(input, output, session) {
         text.angle.x = 90
       ) + coord_fixed()
     } else {
-      arch <- get_dslt_column_metadata_safe(state$dslt, assay_name, "archetypes")
+      arch <- ensure_archetype_metadata(state, assay_name, level = "lineage")
       validate(need(!is.null(arch), "Archetype metadata not available."))
       arch_mat <- as.matrix(arch)
       values_mat <- t(tanh(arch_mat / 3))
@@ -1757,7 +1790,6 @@ server <- function(input, output, session) {
     req(state$dslt, input$single_rds_object_select, input$single_bubble_mode)
     assay_name <- input$single_rds_object_select
     if (!nzchar(assay_name)) return(NULL)
-    cell_line <- assay_name
     if (input$single_bubble_mode == "cluster") {
       res <- ensure_knn_embeddings(state, assay_name, level = "single_cell")
       mat <- get_dslt_assay_safe(state$dslt, "single_cell", assay_name)
@@ -1809,7 +1841,7 @@ server <- function(input, output, session) {
         text.angle.x = 90
       ) + coord_fixed()
     } else {
-      arch <- get_dslt_column_metadata_safe(state$dslt, assay_name, "archetypes")
+      arch <- ensure_archetype_metadata(state, assay_name, level = "single_cell")
       validate(need(!is.null(arch), "Archetype metadata not available."))
       arch_mat <- as.matrix(arch)
       values_mat <- t(tanh(arch_mat / 3))
@@ -1838,7 +1870,7 @@ server <- function(input, output, session) {
     }
   })
 
-  output$lineage_bubble_plot <- renderPlot({ req(single_bubble_plot_obj()); single_bubble_plot_obj() })
+  output$single_bubble_plot <- renderPlot({ req(single_bubble_plot_obj()); single_bubble_plot_obj() })
 
   output$single_violin_plot <- renderPlot({
     req(state$seurat$sc_rna)
