@@ -1085,7 +1085,7 @@ server <- function(input, output, session) {
         seu_atac <- FindTopFeatures(seu_atac, min.cutoff = 'q0')
         seu_atac <- RunSVD(seu_atac)
         state$seurat$sc_atac <- seu_atac
-        
+
         output$qc_atac_depth_correlation <- renderPlot({
           req(state$seurat$sc_atac)
           seu <- state$seurat$sc_atac
@@ -1117,6 +1117,7 @@ server <- function(input, output, session) {
         atac_tsne_res <- ensure_tsne(seu_atac, input$single_tsne_svd_dims, dslt = state$dslt, assays = "ATAC", level = "single cell")
         seu_atac <- atac_tsne_res$seu
         state$dslt <- atac_tsne_res$dslt
+        state$seurat$sc_atac <- seu_atac
       }
 
       # Mapping to lineage level -----------------------------------------
