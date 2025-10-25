@@ -1049,7 +1049,9 @@ server <- function(input, output, session) {
           seu_atac <- tryCatch(filter_cells_by_suffix(seu_atac, suffix = suffix), error = function(e) seu_atac)
         }
         seu_atac <- calculate_nucleosome_signal(seu_atac)
+        if (!"TSS_fragments" %in% colnames(seu_atac@meta.data)) {
         seu_atac <- calculate_tss_enrichment(seu_atac)
+        }
         seu_atac <- calculate_atac_qc_metrics(seu_atac)
 
         incProgress(0.35, detail = "Plotting Single Cell ATAC QC metrics...")
@@ -1263,6 +1265,44 @@ server <- function(input, output, session) {
 
       state$qc_applied <- TRUE
       output$qc_settings_status <- renderText("QC settings applied successfully!")
+      # ... [所有现有的 QC 和映射代码，例如 state$single_drug_values <- ... ] ...
+      
+      # --- 您要添加的代码开始 ---
+      
+      # 1. 尝试保存对象
+      tryCatch({
+        
+        # 2. 将所有对象打包到一个列表中
+        snapshot_data <- list(
+          sc_rna = state$seurat$sc_rna,
+          sc_atac = state$seurat$sc_atac,
+          pb_rna = state$seurat$pb_rna,
+          dslt = state$dslt
+        )
+        
+        # 3. 创建一个带时间戳的唯一文件名
+        timestamp <- format(Sys.time(), "%Y-%m-%d_%H%M%S")
+        filename <- paste0("qc_snapshot_", timestamp, ".rds")
+        
+        # 4. 保存到文件
+        saveRDS(snapshot_data, file = filename)
+        
+        # 5. (可选) 通知用户保存成功
+        # (如果您使用的是 server.R，showNotification 已经可用)
+        showNotification(
+          paste("QC snapshot saved to server at:", filename), 
+          type = "message", 
+          duration = 5
+        )
+        
+      }, error = function(e) {
+        # 6. (可选) 保存失败时发出警告
+        showNotification(
+          paste("Failed to save QC snapshot:", e$message), 
+          type = "error", 
+          duration = 10
+        )
+      })
     })
   })
   # -----------------------------------------------------------------------

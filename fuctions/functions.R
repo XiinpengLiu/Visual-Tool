@@ -316,7 +316,7 @@ calculate_tss_enrichment <- function(se_atac) {
 #' @return ggplot图形对象
 #' @export
 plot_tss_density_scatter <- function(se_atac) {
-  p <- DensityScatter(se_atac, x = 'nCount_peaks', y = 'TSS.enrichment', 
+  p <- DensityScatter(se_atac, x = 'nCount_peaks', y = 'TSS_fragments', 
                       log_x = TRUE, quantiles = TRUE)
   return(p)
 }
@@ -368,7 +368,7 @@ plot_atac_qc_violins <- function(se_atac,
   atsc2 <- VlnPlot(object = se_atac, features = 'pct_reads_in_peaks') +
     geom_hline(yintercept = pct_reads_min, linetype = "dashed", color = "red")
   
-  atsc3 <- VlnPlot(object = se_atac, features = 'TSS.enrichment') +
+  atsc3 <- VlnPlot(object = se_atac, features = 'TSS_fragments') +
     geom_hline(yintercept = tss_min, linetype = "dashed", color = "red")
   
   atsc4 <- VlnPlot(object = se_atac, features = 'nucleosome_signal') +
@@ -392,7 +392,7 @@ plot_atac_qc_violins <- function(se_atac,
 #' @param pct_reads_min pct_reads_in_peaks最小值,默认20
 #' @param blacklist_max blacklist_ratio最大值,默认0.02
 #' @param nucleosome_max nucleosome_signal最大值,默认4
-#' @param tss_min TSS.enrichment最小值,默认2
+#' @param tss_min TSS_fragments最小值,默认2
 #' @param suffix 细胞后缀过滤,默认"-1$"
 #' @param verbose 是否打印过滤信息,默认TRUE
 #' @return 过滤后的Seurat对象
@@ -418,7 +418,7 @@ filter_atac_cells <- function(se_atac,
       pct_reads_in_peaks > pct_reads_min & 
       blacklist_ratio < blacklist_max & 
       nucleosome_signal < nucleosome_max & 
-      TSS.enrichment > tss_min
+      TSS_fragments > tss_min
   )
   
   if (verbose) {
