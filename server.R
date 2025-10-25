@@ -1066,7 +1066,6 @@ server <- function(input, output, session) {
           nucleosome_max = input$atac_nucleosome_signal_max,
           blacklist_max = input$atac_blacklist_ratio_max
         )
-        state$seurat$sc_atac <- seu_atac
 
         incProgress(0.40, detail = "Filtering ATAC cells...")
 
@@ -1085,7 +1084,8 @@ server <- function(input, output, session) {
         seu_atac <- RunTFIDF(seu_atac)
         seu_atac <- FindTopFeatures(seu_atac, min.cutoff = 'q0')
         seu_atac <- RunSVD(seu_atac)
-
+        state$seurat$sc_atac <- seu_atac
+        
         output$qc_atac_depth_correlation <- renderPlot({
           req(state$seurat$sc_atac)
           seu <- state$seurat$sc_atac
