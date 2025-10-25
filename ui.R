@@ -467,47 +467,39 @@ ui <- dashboardPage(
               status = "primary",
 
               # Clustering Method Selection
-              selectInput("lineage_clustering_method", "Select Clustering Method:",
-                choices = c("UMAP" = "umap", "PCA" = "pca", "t-SNE" = "tsne", "K-Means" = "kmeans")),
+              selectInput("lineage_red_method", "Select Reduction Method:",
+                choices = c("UMAP" = "umap", "PCAorSVD" = "pca", "t-SNE" = "tsne")),
+
+               selectInput("lineage_clustering_method", "Select Clustering Method:",
+                choices = c("Louvain" = "louvain", "K-Means" = "kmeans")),
 
               conditionalPanel(
                 condition = "input.lineage_clustering_method == 'kmeans'",
-                textInput("lineage_kmeans_input", "K:", "e.g., 3")
+                textInput("lineage_kmeans_input", "K:", value = 5)
               ),
 
               conditionalPanel(
-                condition = "input.lineage_clustering_method == 'umap'",
+                condition = "input.lineage_red_method == 'umap'",
                 numericRangeInput("lineage_umap_pca_dims", "PCA dimensions", value = c(1, 30), min = 1, max = 50)
               ),
               conditionalPanel(
-                condition = "input.lineage_clustering_method == 'umap'",
+                condition = "input.lineage_red_method == 'umap'",
                 numericRangeInput("lineage_umap_svd_dims", "SVD dimensions", value = c(2, 30), min = 1, max = 50)
               ),
 
               conditionalPanel(
-                condition = "input.lineage_clustering_method == 'tsne'",
+                condition = "input.lineage_red_method == 'tsne'",
                 numericRangeInput("lineage_tsne_pca_dims", "PCA dimensions", value = c(1, 30), min = 1, max = 50)
               ),
               conditionalPanel(
-                condition = "input.lineage_clustering_method == 'tsne'",
+                condition = "input.lineage_red_method == 'tsne'",
                 numericRangeInput("lineage_tsne_svd_dims", "SVD dimensions", value = c(2, 30), min = 1, max = 50)
               ),
 
               hr(),
 
-              # UMAP Coloring Selector
-              h4("UMAP Plot Coloring"),
-              selectInput("lineage_color_by", "Select Coloring Variable Type:",
-                choices = c(
-                  "Cell Clusters" = "cluster",
-                  "Drug Response" = "drug_response"
-                )),
-
-              # -- Conditional UI: Display different options based on coloring selection --
-              # Drug Response/Growth Rate Selection
-              conditionalPanel(
-                condition = "input.lineage_color_by == 'drug_response'",
-                pickerInput(
+            h4("Drug Data selection"),
+            pickerInput(
                   "lineage_rds_object_select",
                   "Select dataset",
                   choices = NULL,
@@ -516,8 +508,8 @@ ui <- dashboardPage(
                     liveSearch = TRUE,
                     noneSelectedText = "Awaiting lineage assays"
                   )
-                ),
-                pickerInput(
+              ),
+            pickerInput(
                   "lineage_drug_select",
                   "Select drugs",
                   choices = NULL,
@@ -527,7 +519,6 @@ ui <- dashboardPage(
                     liveSearch = TRUE,
                     noneSelectedText = "Awaiting uploaded metadata"
                   )
-                )
               ),
 
               radioButtons(
@@ -576,8 +567,7 @@ ui <- dashboardPage(
             fluidRow(
               box(title = "Combining genomic tracks", width = 12,
                 tabBox(width = 12,
-                  tabPanel("Cross-cluster violin", plotOutput("lineage_violin_plot")),
-                  tabPanel("Coverage", plotOutput("lineage_coverage_plot"))
+                  tabPanel("Cross-cluster violin", plotOutput("lineage_violin_plot"))
                 )
               )
             )
@@ -599,47 +589,39 @@ ui <- dashboardPage(
               status = "primary",
 
               # Clustering Method Selection
-              selectInput("single_clustering_method", "Select Clustering Method:",
-                choices = c("UMAP" = "umap", "PCA" = "pca", "t-SNE" = "tsne", "K-Means" = "kmeans")),
+              selectInput("single_red_method", "Select Reduction Method:",
+                choices = c("UMAP" = "umap", "PCAorSVD" = "pca", "t-SNE" = "tsne")),
+
+               selectInput("single_clustering_method", "Select Clustering Method:",
+                choices = c("Louvain" = "louvain", "K-Means" = "kmeans")),
 
               conditionalPanel(
                 condition = "input.single_clustering_method == 'kmeans'",
-                textInput("single_kmeans_input", "K:", "e.g., 3")
+                textInput("single_kmeans_input", "K:", value = 5)
               ),
 
               conditionalPanel(
-                condition = "input.single_clustering_method == 'umap'",
+                condition = "input.single_red_method == 'umap'",
                 numericRangeInput("single_umap_pca_dims", "PCA dimensions", value = c(1, 30), min = 1, max = 50)
               ),
               conditionalPanel(
-                condition = "input.single_clustering_method == 'umap'",
+                condition = "input.single_red_method == 'umap'",
                 numericRangeInput("single_umap_svd_dims", "SVD dimensions", value = c(2, 30), min = 1, max = 50)
               ),
 
               conditionalPanel(
-                condition = "input.single_clustering_method == 'tsne'",
+                condition = "input.single_red_method == 'tsne'",
                 numericRangeInput("single_tsne_pca_dims", "PCA dimensions", value = c(1, 30), min = 1, max = 50)
               ),
               conditionalPanel(
-                condition = "input.single_clustering_method == 'tsne'",
+                condition = "input.single_red_method == 'tsne'",
                 numericRangeInput("single_tsne_svd_dims", "SVD dimensions", value = c(2, 30), min = 1, max = 50)
               ),
 
               hr(),
 
-              # UMAP Coloring Selector
-              h4("UMAP Plot Coloring"),
-              selectInput("single_color_by", "Select Coloring Variable Type:",
-                choices = c(
-                  "Cell Clusters" = "cluster",
-                  "Drug Response" = "drug_response"
-                )),
-
-              # -- Conditional UI: Display different options based on coloring selection --
-              # Drug Response/Growth Rate Selection
-              conditionalPanel(
-                condition = "input.single_color_by == 'drug_response'",
-                pickerInput(
+              h4("Drug Data selection"),
+              pickerInput(
                   "single_rds_object_select",
                   "Select dataset",
                   choices = NULL,
@@ -648,8 +630,8 @@ ui <- dashboardPage(
                     liveSearch = TRUE,
                     noneSelectedText = "Awaiting single-cell assays"
                   )
-                ),
-                pickerInput(
+              ),
+              pickerInput(
                   "single_drug_select",
                   "Select drugs",
                   choices = NULL,
@@ -657,10 +639,17 @@ ui <- dashboardPage(
                   options = pickerOptions(
                     actionsBox = TRUE,
                     liveSearch = TRUE,
-                    noneSelectedText = "Drug data requires RNA mapping - apply QC settings first"
+                    noneSelectedText = "Awaiting uploaded metadata"
                   )
-                )
               ),
+
+              
+              radioButtons(
+                "single_bubble_mode",
+                "Bubble plot mode",
+                choices = c("Cluster" = "cluster", "Archetype" = "archetype"),
+                inline = TRUE
+              ),              
 
               hr(),
               h4("Coloring/combining genomic tracks"),
@@ -693,13 +682,15 @@ ui <- dashboardPage(
               box(title = "ATAC-seq Clustering", width = 6, plotOutput("single_atac_cluster_plot")),
               box(title = "Drug Response Embedding", width = 6, plotOutput("single_drug_response_plot"))
             ),
+             fluidRow(
+              box(title = "Cluster/Archetype Bubble", width = 12, plotOutput("single_bubble_plot"))
+            ),
 
             # -- Expression/Accessibility Analysis --
             fluidRow(
               box(title = "Combining genomic tracks", width = 12,
                 tabBox(width = 12,
-                  tabPanel("Cross-cluster violin", plotOutput("single_violin_plot")),
-                  tabPanel("Coverage", plotOutput("single_coverage_plot"))
+                  tabPanel("Cross-cluster violin", plotOutput("single_violin_plot"))
                 )
               )
             )
