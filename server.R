@@ -1320,7 +1320,28 @@ server <- function(input, output, session) {
       incProgress(1, detail = drug_mapping_detail)
 
       state$qc_applied <- TRUE
-      
+
+      if (length(state$denoised_assays)) {
+        for (assay in state$denoised_assays) {
+          if (!nzchar(assay)) {
+            next
+          }
+          if (is.null(get_dslt_assay_safe(state$dslt, "lineage", assay))) {
+            next
+          }
+          tryCatch({
+            ensure_knn_embeddings(state, assay, level = "lineage")
+          }, error = function(e) {
+            showNotification(paste("Failed to compute KNN for", assay, ":", e$message), type = "error")
+          })
+          tryCatch({
+            ensure_archetype_metadata(state, assay, level = "lineage")
+          }, error = function(e) {
+            showNotification(paste("Failed to compute archetype analysis for", assay, ":", e$message), type = "error")
+          })
+        }
+      }
+
       # 1. 尝试保存对象
       tryCatch({
         
