@@ -694,24 +694,32 @@ applyAdaptiveKernelDenoising <- function(dslt,
 #' @return The updated `DatasetLT` object.
 performArchetypeAndAnnotate <- function(dslt,
                                         smoothed_assay_name,
+                                        levels = NULL,
                                         center_flag = TRUE,
                                         scale_flag = TRUE,
                                         kappa_value = 9,
                                         worker_count = 20,
                                         projected_count = 4) {
-  archetype_input <- as.data.frame(dslt$getAssay("lineage", smoothed_assay_name))
-  archetype_input <- scale2(archetype_input, center = center_flag, scale = scale_flag)
-  archetype_results <- find_params_and_perform_arch(archetype_input,
-                                                    kappa = kappa_value,
-                                                    nworkers = worker_count,
-                                                    nprojected = projected_count)
-  dslt$addEmbedding(smoothed_assay_name,
-                           names = c("archetype_alpha"),
-                           input = archetype_results$A)
-  dslt$addColumnMetadata(smoothed_assay_name,
-                                "archetypes",
-                                t(archetype_results$BY))
-  dslt
+  if (levels == "lineage") {
+    archetype_input <- as.data.frame(dslt$getAssay("lineage", smoothed_assay_name))
+    archetype_input <- scale2(archetype_input, center = center_flag, scale = scale_flag)
+    archetype_results <- find_params_and_perform_arch(archetype_input,
+                                                      kappa = kappa_value,
+                                                      nworkers = worker_count,
+                                                      nprojected = projected_count)
+    dslt[["embeddings"]][["lineage"]][[smoothed_assay_name]][["archetype_alpha"]] <- archetype_results$A
+    dslt[["columnMetadata"]][["lineage"]][[smoothed_assay_name]][["archetypes"]] <- t(archetype_results$BY)
+    dslt
+  } else {
+    archetype_input <- as.data.frame(dslt$getAssay("single_cell", smoothed_assay_name))
+    archetype_input <- scale2(archetype_input, center = center_flag, scale = scale_flag)
+    archetype_results <- find_params_and_perform_arch(archetype_input,
+                                                      kappa = kappa_value,
+                                                      nworkers = worker_count,
+                                                      nprojected = projected_count)
+    dslt[["embeddings"]][["single_cell"]][[smoothed_assay_name]][["archetype_alpha"]] <- archetype_results$A
+    dslt[["columnMetadata"]][["single_cell"]][[smoothed_assay_name]][["archetypes"]] <- t(archetype_results$BY)
+  }
 }
 
 #------------------------------------------------Plotting preparation, clustering
