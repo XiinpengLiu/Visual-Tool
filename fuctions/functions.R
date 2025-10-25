@@ -727,27 +727,32 @@ performArchetypeAndAnnotate <- function(dslt,
 #' @return The updated `DatasetLT` object.
 runKnnAnalysisAndStore <- function(dslt,
                                    smoothed_assay_name,
+                                   levels = NULL,
                                    k_neighbors_prop_value = 0.025,
                                    snn_threshold_prop_value = 0.2,
                                    gamma_value = 1,
                                    min_neighbor_count = 10) {
-  knn_results_object <- runKnnAnalysis(dslt$getAssay("lineage", smoothed_assay_name, force = TRUE),
-                                       k_neighbors_prop = k_neighbors_prop_value,
-                                       snn_threshold_prop = snn_threshold_prop_value,
-                                       gamma = gamma_value)
-  dslt$addGraph(smoothed_assay_name,
-                       names = NULL,
-                       input = knn_results_object[c("similarity_full", "similarity_snn", "adjacency_snn", "distance_matrix")])
-  dslt$addEmbedding(smoothed_assay_name,
-                           names = c("louvain_clusters"),
-                           input = data.frame(louvain_clusters = (knn_results_object[[c("louvain_clusters")]] )))
-  dslt$addGraph(smoothed_assay_name,
-                       names = "dist_snn",
-                       input = distance_form_similarity_log(dslt$getGraph(smoothed_assay_name, "similarity_snn")))
-  dslt$addEmbedding(smoothed_assay_name,
-                           names = c("umap"),
-                           input = uwot::umap(dslt$getGraph(smoothed_assay_name, "dist_snn"), n_neighbors = 150))
-  dslt
+  if (levels == "lineage") {
+    knn_results_object <- runKnnAnalysis(dslt$getAssay("lineage", smoothed_assay_name, force = TRUE),
+                                        k_neighbors_prop = k_neighbors_prop_value,
+                                        snn_threshold_prop = snn_threshold_prop_value,
+                                        gamma = gamma_value)
+    dslt[["graphs"]][["lineage"]][[smoothed_assay_name]] <- knn_results_object[c("similarity_full", "similarity_snn", "adjacency_snn", "distance_matrix")]
+    dslt[["embeddings"]][["lineage"]][[smoothed_assay_name]][["louvain_clusters"]] <- data.frame(louvain_clusters = (knn_results_object[[c("louvain_clusters")]] ))
+    dslt[["graphs"]][["lineage"]][[smoothed_assay_name]][["dist_snn"]] <- distance_form_similarity_log(dslt[["graphs"]][["lineage"]][[smoothed_assay_name]][["similarity_snn"]])
+    dslt[["embeddings"]][["lineage"]][[smoothed_assay_name]][["umap"]] <- uwot::umap(dslt[["graphs"]][["lineage"]][[smoothed_assay_name]][["dist_snn"]], n_neighbors = 150)
+    dslt
+  } else {
+    knn_results_object <- runKnnAnalysis(dslt$getAssay("single_cell", smoothed_assay_name, force = TRUE),
+                                        k_neighbors_prop = k_neighbors_prop_value,
+                                        snn_threshold_prop = snn_threshold_prop_value,
+                                        gamma = gamma_value)
+    dslt[["graphs"]][["single_cell"]][[smoothed_assay_name]] <- knn_results_object[c("similarity_full", "similarity_snn", "adjacency_snn", "distance_matrix")]
+    dslt[["embeddings"]][["single_cell"]][[smoothed_assay_name]][["louvain_clusters"]] <- data.frame(louvain_clusters = (knn_results_object[[c("louvain_clusters")]] ))
+    dslt[["graphs"]][["single_cell"]][[smoothed_assay_name]][["dist_snn"]] <- distance_form_similarity_log(dslt[["graphs"]][["single_cell"]][[smoothed_assay_name]][["similarity_snn"]])
+    dslt[["embeddings"]][["single_cell"]][[smoothed_assay_name]][["umap"]] <- uwot::umap(dslt[["graphs"]][["single_cell"]][[smoothed_assay_name]][["dist_snn"]], n_neighbors = 150)
+    dslt
+  }
 }
 
 update_dslt_embedding <- function(dslt, assays, level, name, embedding) {
