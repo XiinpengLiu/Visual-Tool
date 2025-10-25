@@ -292,8 +292,22 @@ get_drug_scores <- function(assays, assay_name, drugs) {
   data.frame(barcode = rownames(mat), score = vals, stringsAsFactors = FALSE)
 }
 
-get_dslt_embedding_safe <- function(dslt, assay_name, slot) {
-  tryCatch(dslt$getEmbedding(assay_name, slot), error = function(e) NULL)
+get_dslt_embedding_safe <- function(dslt, level, assay_name, slot) {
+  res <- tryCatch({
+    embeddings <- dslt[["embeddings"]]
+    if (is.null(embeddings)) return(NULL)
+    level_embeddings <- embeddings[[level]]
+    if (is.null(level_embeddings)) return(NULL)
+    assay_embeddings <- level_embeddings[[assay_name]]
+    if (is.null(assay_embeddings)) return(NULL)
+    assay_embeddings[[slot]]
+  }, error = function(e) NULL)
+  if (!is.null(res)) {
+    return(res)
+  }
+  tryCatch(dslt$getEmbedding(level, assay_name, slot), error = function(e) {
+    tryCatch(dslt$getEmbedding(assay_name, slot), error = function(e2) NULL)
+  })
 }
 
 get_dslt_assay_safe <- function(dslt, level, assay_name) {
@@ -304,17 +318,18 @@ get_dslt_column_metadata_safe <- function(dslt, assay_name, field) {
   tryCatch(dslt$getColumnMetadata(assay_name, field), error = function(e) NULL)
 }
 
-ensure_knn_embeddings <- function(state, assay_name) {
+ensure_knn_embeddings <- function(state, assay_name, level = c("lineage", "single_cell")) {
   if (is.null(state$dslt) || !nzchar(assay_name)) return(list(coords = NULL, clusters = NULL))
-  assay_present <- !is.null(get_dslt_assay_safe(state$dslt, "lineage", assay_name))
+  level <- match.arg(level)
+  assay_present <- !is.null(get_dslt_assay_safe(state$dslt, level, assay_name))
   if (!assay_present) {
     return(list(coords = NULL, clusters = NULL))
   }
-  coords <- get_dslt_embedding_safe(state$dslt, assay_name, "umap")
-  clusters <- get_dslt_embedding_safe(state$dslt, assay_name, "louvain_clusters")
+  coords <- get_dslt_embedding_safe(state$dslt, level, assay_name, "umap")
+  clusters <- get_dslt_embedding_safe(state$dslt, level, assay_name, "louvain_clusters")
   if (is.null(coords) || is.null(clusters)) {
     dslt_updated <- tryCatch(
-      runKnnAnalysisAndStore(state$dslt, assay_name),
+      runKnnAnalysisAndStore(state$dslt, assay_name, levels = level),
       error = function(e) {
         showNotification(paste("KNN analysis failed:", e$message), type = "error")
         NULL
@@ -324,8 +339,11 @@ ensure_knn_embeddings <- function(state, assay_name) {
       return(list(coords = NULL, clusters = NULL))
     }
     state$dslt <- dslt_updated
-    coords <- get_dslt_embedding_safe(state$dslt, assay_name, "umap")
-    clusters <- get_dslt_embedding_safe(state$dslt, assay_name, "louvain_clusters")
+    coords <- get_dslt_embedding_safe(state$dslt, level, assay_name, "umap")
+    clusters <- get_dslt_embedding_safe(state$dslt, level, assay_name, "louvain_clusters")
+  }
+  if (is.data.frame(clusters) && "louvain_clusters" %in% colnames(clusters)) {
+    clusters <- clusters$louvain_clusters
   }
   list(coords = coords, clusters = clusters)
 }
@@ -1467,7 +1485,7 @@ server <- function(input, output, session) {
 
   lineage_knn_plot_obj <- reactive({
     req(input$lineage_rds_object_select)
-    res <- ensure_knn_embeddings(state, input$lineage_rds_object_select)
+    res <- ensure_knn_embeddings(state, input$lineage_rds_object_select, level = "lineage")
     validate(need(!is.null(res$coords) && !is.null(res$clusters), "Run KNN analysis on the selected assay."))
     colored_clusters <- ggscatter_colored(
       res$coords,
@@ -1497,7 +1515,7 @@ server <- function(input, output, session) {
     req(state$dslt, state$lineage_drug_values)
     assay_name <- input$lineage_rds_object_select
     req(assay_name)
-    res <- ensure_knn_embeddings(state, assay_name)
+    res <- ensure_knn_embeddings(state, assay_name, level = "lineage")
     coords <- as.matrix(res$coords)
     validate(need(!is.null(coords), "Run KNN analysis on the selected assay."))
     mat <- get_dslt_assay_safe(state$dslt, "lineage", assay_name)
@@ -1532,7 +1550,7 @@ server <- function(input, output, session) {
     if (!nzchar(assay_name)) return(NULL)
     cell_line <- assay_name
     if (input$lineage_bubble_mode == "cluster") {
-      res <- ensure_knn_embeddings(state, assay_name)
+      res <- ensure_knn_embeddings(state, assay_name, level = "lineage")
       mat <- get_dslt_assay_safe(state$dslt, "lineage", assay_name)
       if (is.null(res$clusters) || is.null(mat)) return(NULL)
       cluster_df <- as.data.frame(res$clusters)
@@ -1653,7 +1671,7 @@ server <- function(input, output, session) {
 
   single_knn_plot_obj <- reactive({
     req(input$single_rds_object_select)
-    res <- ensure_knn_embeddings(state, input$single_rds_object_select)
+    res <- ensure_knn_embeddings(state, input$single_rds_object_select, level = "single_cell")
     validate(need(!is.null(res$coords) && !is.null(res$clusters), "Run KNN analysis on the selected assay."))
     colored_clusters <- ggscatter_colored(
       res$coords,
@@ -1688,7 +1706,7 @@ server <- function(input, output, session) {
     coords <- NULL
     mat <- NULL
     if (!is.null(state$dslt)) {
-      res <- ensure_knn_embeddings(state, assay_name)
+      res <- ensure_knn_embeddings(state, assay_name, level = "single_cell")
       coords <- res$coords
       mat <- get_dslt_assay_safe(state$dslt, "single_cell", assay_name)
       if (is.null(mat)) {
@@ -1705,11 +1723,19 @@ server <- function(input, output, session) {
     req(!is.null(coords), !is.null(mat))
     mat <- as.matrix(mat)
     mat <- normalize_matrix(mat)
-    selected <- intersect(colnames(mat), input$single_drug_select)
-    validate(need(length(selected) > 0, "Select at least one drug."))
+    selected_drugs <- intersect(colnames(mat), input$single_drug_select)
+    validate(need(length(selected_drugs) > 0, "Select at least one drug."))
+    mat <- mat[, selected_drugs, drop = FALSE]
     coords <- as.matrix(coords)
-    if (is.null(rownames(coords)) && !is.null(rownames(mat))) {
+    if (!is.null(rownames(coords)) && !is.null(rownames(mat))) {
+      common <- intersect(rownames(coords), rownames(mat))
+      validate(need(length(common) > 0, "No overlapping cells between embeddings and drug data."))
+      coords <- coords[common, , drop = FALSE]
+      mat <- mat[common, , drop = FALSE]
+    } else if (is.null(rownames(coords)) && !is.null(rownames(mat))) {
       rownames(coords) <- rownames(mat)
+    } else if (!is.null(rownames(coords)) && is.null(rownames(mat))) {
+      rownames(mat) <- rownames(coords)
     }
     plot_list <- ggscatter_single(
       coords = coords,
@@ -1733,23 +1759,29 @@ server <- function(input, output, session) {
     if (!nzchar(assay_name)) return(NULL)
     cell_line <- assay_name
     if (input$single_bubble_mode == "cluster") {
-      res <- ensure_knn_embeddings(state, assay_name)
+      res <- ensure_knn_embeddings(state, assay_name, level = "single_cell")
       mat <- get_dslt_assay_safe(state$dslt, "single_cell", assay_name)
       if (is.null(res$clusters) || is.null(mat)) return(NULL)
-      cluster_df <- as.data.frame(res$clusters)
-      cluster_vals <- if ("louvain_clusters" %in% colnames(cluster_df)) cluster_df$louvain_clusters else cluster_df[[1]]
-      cluster_vals <- as.factor(cluster_vals)
+      clusters <- res$clusters
+      if (is.matrix(clusters) || is.data.frame(clusters)) {
+        cluster_df <- as.data.frame(clusters)
+        if ("louvain_clusters" %in% colnames(cluster_df)) {
+          clusters <- cluster_df[["louvain_clusters"]]
+        } else {
+          clusters <- cluster_df[[1]]
+        }
+        if (!is.null(rownames(cluster_df)) && is.null(names(clusters))) {
+          names(clusters) <- rownames(cluster_df)
+        }
+      }
+      cluster_vals <- as.factor(clusters)
       mat_df <- as.data.frame(as.matrix(mat))
-      if (is.null(rownames(cluster_df)) && !is.null(rownames(mat_df))) {
-        rownames(cluster_df) <- rownames(mat_df)
-      }
-      if (is.null(rownames(mat_df)) && !is.null(rownames(cluster_df))) {
-        rownames(mat_df) <- rownames(cluster_df)
-      }
-      if (is.null(names(cluster_vals))) {
-        names(cluster_vals) <- rownames(cluster_df)
-      }
-      if (is.null(names(cluster_vals)) && !is.null(rownames(mat_df))) {
+      if (!is.null(names(cluster_vals)) && !is.null(rownames(mat_df))) {
+        common <- intersect(names(cluster_vals), rownames(mat_df))
+        validate(need(length(common) > 0, "No overlapping cells between clusters and drug data."))
+        cluster_vals <- cluster_vals[common]
+        mat_df <- mat_df[common, , drop = FALSE]
+      } else if (is.null(names(cluster_vals)) && !is.null(rownames(mat_df))) {
         names(cluster_vals) <- rownames(mat_df)
       }
       summarized_clusters <- summarize_columns(mat_df, cluster_vals, order_rows = TRUE)
