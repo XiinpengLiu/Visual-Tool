@@ -709,7 +709,6 @@ performArchetypeAndAnnotate <- function(dslt,
                                                       nprojected = projected_count)
     dslt[["embeddings"]][["lineage"]][[smoothed_assay_name]][["archetype_alpha"]] <- archetype_results$A
     dslt[["columnMetadata"]][["lineage"]][[smoothed_assay_name]][["archetypes"]] <- t(archetype_results$BY)
-    dslt
   } else {
     archetype_input <- as.data.frame(dslt$getAssay("single_cell", smoothed_assay_name))
     archetype_input <- scale2(archetype_input, center = center_flag, scale = scale_flag)
@@ -720,6 +719,7 @@ performArchetypeAndAnnotate <- function(dslt,
     dslt[["embeddings"]][["single_cell"]][[smoothed_assay_name]][["archetype_alpha"]] <- archetype_results$A
     dslt[["columnMetadata"]][["single_cell"]][[smoothed_assay_name]][["archetypes"]] <- t(archetype_results$BY)
   }
+  dslt
 }
 
 #------------------------------------------------Plotting preparation, clustering
@@ -749,7 +749,6 @@ runKnnAnalysisAndStore <- function(dslt,
     dslt[["embeddings"]][["lineage"]][[smoothed_assay_name]][["louvain_clusters"]] <- data.frame(louvain_clusters = (knn_results_object[[c("louvain_clusters")]] ))
     dslt[["graphs"]][["lineage"]][[smoothed_assay_name]][["dist_snn"]] <- distance_form_similarity_log(dslt[["graphs"]][["lineage"]][[smoothed_assay_name]][["similarity_snn"]])
     dslt[["embeddings"]][["lineage"]][[smoothed_assay_name]][["umap"]] <- uwot::umap(dslt[["graphs"]][["lineage"]][[smoothed_assay_name]][["dist_snn"]], n_neighbors = 150)
-    dslt
   } else {
     knn_results_object <- runKnnAnalysis(dslt$getAssay("single_cell", smoothed_assay_name, force = TRUE),
                                         k_neighbors_prop = k_neighbors_prop_value,
@@ -759,8 +758,8 @@ runKnnAnalysisAndStore <- function(dslt,
     dslt[["embeddings"]][["single_cell"]][[smoothed_assay_name]][["louvain_clusters"]] <- data.frame(louvain_clusters = (knn_results_object[[c("louvain_clusters")]] ))
     dslt[["graphs"]][["single_cell"]][[smoothed_assay_name]][["dist_snn"]] <- distance_form_similarity_log(dslt[["graphs"]][["single_cell"]][[smoothed_assay_name]][["similarity_snn"]])
     dslt[["embeddings"]][["single_cell"]][[smoothed_assay_name]][["umap"]] <- uwot::umap(dslt[["graphs"]][["single_cell"]][[smoothed_assay_name]][["dist_snn"]], n_neighbors = 150)
-    dslt
   }
+  dslt
 }
 
 update_dslt_embedding <- function(dslt, assays, level, name, embedding) {

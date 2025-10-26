@@ -314,8 +314,45 @@ get_dslt_assay_safe <- function(dslt, level, assay_name) {
   tryCatch(dslt$getAssay(level, assay_name, force = TRUE), error = function(e) NULL)
 }
 
-get_dslt_column_metadata_safe <- function(dslt, assay_name, field) {
-  tryCatch(dslt$getColumnMetadata(assay_name, field), error = function(e) NULL)
+get_dslt_column_metadata_safe <- function(dslt, assay_name, field, level = NULL) {
+  if (is.null(dslt) || !nzchar(assay_name) || !nzchar(field)) {
+    return(NULL)
+  }
+
+  column_meta <- tryCatch(dslt[["columnMetadata"]], error = function(e) NULL)
+  if (is.null(column_meta)) {
+    return(NULL)
+  }
+
+  levels_to_check <- if (is.null(level)) list(NULL) else as.list(level)
+
+  for (lvl in levels_to_check) {
+    container <- if (is.null(lvl)) {
+      column_meta[[assay_name]]
+    } else {
+      level_key <- as.character(lvl)
+      if (is.null(column_meta[[level_key]])) {
+        next
+      }
+      column_meta[[level_key]][[assay_name]]
+    }
+
+    if (is.null(container)) {
+      next
+    }
+
+    # Support both list-style access and data.frames where the field is a column
+    value <- container[[field]]
+    if (is.null(value) && is.data.frame(container) && field %in% colnames(container)) {
+      value <- container[[field]]
+    }
+
+    if (!is.null(value)) {
+      return(value)
+    }
+  }
+
+  NULL
 }
 
 ensure_archetype_metadata <- function(state, assay_name, level = c("lineage", "single_cell")) {
@@ -324,7 +361,7 @@ ensure_archetype_metadata <- function(state, assay_name, level = c("lineage", "s
     return(NULL)
   }
 
-  arch <- get_dslt_column_metadata_safe(state$dslt, assay_name, "archetypes")
+  arch <- get_dslt_column_metadata_safe(state$dslt, assay_name, "archetypes", level = level)
   if (!is.null(arch)) {
     return(arch)
   }
@@ -353,7 +390,7 @@ ensure_archetype_metadata <- function(state, assay_name, level = c("lineage", "s
     }
   }
 
-  get_dslt_column_metadata_safe(state$dslt, assay_name, "archetypes")
+  get_dslt_column_metadata_safe(state$dslt, assay_name, "archetypes", level = level)
 }
 
 ensure_knn_embeddings <- function(state, assay_name, level = c("lineage", "single_cell")) {
