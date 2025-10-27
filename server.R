@@ -679,6 +679,7 @@ server <- function(input, output, session) {
   })
   output$lineage_rna_mapping_status <- renderText("Optional: upload RNA barcode mapping file.")
   output$single_cell_atac_mapping_status <- renderText("Optional: upload ATAC barcode mapping file.")
+  output$qc_snapshot_status <- renderText("Upload a QC snapshot to restore a previous session.")
 
   observeEvent(input$lineage_rds_file, {
     req(input$lineage_rds_file)
@@ -693,6 +694,11 @@ server <- function(input, output, session) {
   observeEvent(input$single_cell_atac_mapping_file, {
     req(input$single_cell_atac_mapping_file)
     output$single_cell_atac_mapping_status <- renderText("ATAC barcode mapping uploaded.")
+  })
+
+  observeEvent(input$qc_snapshot_file, {
+    req(input$qc_snapshot_file)
+    output$qc_snapshot_status <- renderText("QC snapshot ready to load.")
   })
 
   # -----------------------------------------------------------------------
@@ -960,7 +966,149 @@ server <- function(input, output, session) {
       })
     })
   })
-  
+
+  observeEvent(input$load_qc_snapshot, {
+    req(input$qc_snapshot_file)
+
+    withProgress(message = "Loading QC snapshot...", value = 0, {
+      tryCatch({
+        incProgress(0.2, detail = "Reading snapshot file")
+        snapshot <- readRDS(input$qc_snapshot_file$datapath)
+
+        validate(need(is.list(snapshot), "Snapshot file must contain a list object."))
+        validate(need(!is.null(snapshot$dslt), "Snapshot is missing 'dslt' data."))
+
+        incProgress(0.4, detail = "Restoring processed objects")
+
+        state$dslt <- snapshot$dslt
+
+        if (!is.null(snapshot$denoised_assays)) {
+          state$denoised_assays <- snapshot$denoised_assays
+        }
+
+        if (!is.null(snapshot$sc_rna)) {
+          state$seurat$sc_rna <- snapshot$sc_rna
+          state$seurat$sc_rna_raw <- snapshot$sc_rna
+        }
+        if (!is.null(snapshot$sc_atac)) {
+          state$seurat$sc_atac <- snapshot$sc_atac
+          state$seurat$sc_atac_raw <- snapshot$sc_atac
+        }
+        if (!is.null(snapshot$pb_rna)) {
+          state$seurat$pb_rna <- snapshot$pb_rna
+        }
+        if (!is.null(snapshot$pb_atac)) {
+          state$seurat$pb_atac <- snapshot$pb_atac
+        }
+        if (!is.null(snapshot$qc) && is.list(snapshot$qc)) {
+          state$qc <- modifyList(state$qc, snapshot$qc)
+        }
+        if (!is.null(snapshot$mapping) && is.list(snapshot$mapping)) {
+          state$mapping <- modifyList(state$mapping, snapshot$mapping)
+        }
+        if (!is.null(snapshot$metadata) && is.list(snapshot$metadata)) {
+          state$metadata <- modifyList(state$metadata, snapshot$metadata)
+        }
+
+        incProgress(0.6, detail = "Updating derived state")
+
+        lineage_assays <- NULL
+        if (!is.null(state$dslt[["assays"]][["lineage"]])) {
+          state$lineage_drug_values <- state$dslt[["assays"]][["lineage"]]
+          lineage_assays <- names(state$lineage_drug_values)
+          if (is.null(snapshot$denoised_assays)) {
+            state$denoised_assays <- lineage_assays[grepl("smoothed", lineage_assays, ignore.case = TRUE)]
+          }
+        } else if (!is.null(snapshot$lineage_drug_values)) {
+          state$lineage_drug_values <- snapshot$lineage_drug_values
+          lineage_assays <- names(state$lineage_drug_values)
+        }
+
+        if (!is.null(snapshot$drug_matrix)) {
+          state$drug_matrix <- snapshot$drug_matrix
+        }
+
+        if (!is.null(state$dslt[["assays"]][["single_cell"]])) {
+          state$single_drug_values <- state$dslt[["assays"]][["single_cell"]]
+        } else if (!is.null(snapshot$single_drug_values)) {
+          state$single_drug_values <- snapshot$single_drug_values
+        }
+
+        if (!is.null(state$dslt[["assays"]][["rna_map"]])) {
+          state$lineage_cell_counts <- state$dslt[["assays"]][["rna_map"]]
+        }
+
+        if (!is.null(snapshot$single_cell_counts)) {
+          state$single_cell_counts <- snapshot$single_cell_counts
+        }
+
+        state$qc_applied <- TRUE
+
+        incProgress(0.8, detail = "Refreshing selections")
+
+        if (!is.null(state$lineage_drug_values)) {
+          drug_choices <- extract_drug_choices(state$lineage_drug_values)
+          updatePickerInput(session, "lineage_drug_select", choices = drug_choices)
+
+          dataset_choices <- names(state$lineage_drug_values)
+          if (length(dataset_choices)) {
+            selected_dataset <- dataset_choices[1]
+            if (!is.null(input$lineage_rds_object_select) && input$lineage_rds_object_select %in% dataset_choices) {
+              selected_dataset <- input$lineage_rds_object_select
+            }
+            updatePickerInput(session, "lineage_rds_object_select",
+              choices = dataset_choices,
+              selected = selected_dataset
+            )
+          }
+          if (!is.null(lineage_assays) && length(lineage_assays)) {
+            updatePickerInput(session, "denoise_assays_choice",
+              choices = lineage_assays,
+              selected = intersect(state$denoised_assays, lineage_assays)
+            )
+          }
+        }
+
+        if (!is.null(state$single_drug_values)) {
+          single_drug_choices <- extract_drug_choices(state$single_drug_values)
+          updatePickerInput(session, "single_drug_select", choices = single_drug_choices)
+        }
+
+        output$lineage_upload_status <- renderText("Lineage data restored from QC snapshot.")
+        output$single_cell_upload_status <- renderText("Single-cell data restored from QC snapshot.")
+        output$single_cell_rna_rds_status <- renderText("scRNA-seq object loaded from snapshot.")
+        output$single_cell_atac_rds_status <- renderText("scATAC-seq object loaded from snapshot.")
+        output$qc_snapshot_status <- renderText("QC snapshot loaded successfully.")
+        if (!is.null(state$mapping$rna)) {
+          output$lineage_rna_mapping_status <- renderText("RNA mapping restored from snapshot.")
+        }
+        if (!is.null(state$mapping$atac)) {
+          output$single_cell_atac_mapping_status <- renderText("ATAC mapping restored from snapshot.")
+        }
+        if (!is.null(state$metadata$atac)) {
+          output$single_cell_atac_metadata_status <- renderText("ATAC metadata restored from snapshot.")
+        }
+
+        output$upload_summary <- renderText({
+          paste(
+            "Lineage data: Restored",
+            "\nAvailable assays:", if (length(lineage_assays)) paste(lineage_assays, collapse = ", ") else "None",
+            "\nDenoised assays:", if (length(state$denoised_assays)) paste(state$denoised_assays, collapse = ", ") else "None",
+            "\nSingle-cell RNA:", if (is.null(state$seurat$sc_rna)) "Not available" else "Restored",
+            "\nSingle-cell ATAC:", if (is.null(state$seurat$sc_atac)) "Not available" else "Restored",
+            "\nNote: Snapshot data loaded. QC has already been applied."
+          )
+        })
+
+        showNotification("QC snapshot loaded successfully!", type = "message", duration = 5)
+
+      }, error = function(e) {
+        output$qc_snapshot_status <- renderText(paste("Failed to load snapshot:", e$message))
+        showNotification(paste("Failed to load QC snapshot:", e$message), type = "error", duration = 8)
+      })
+    })
+  })
+
   # Button 3: Apply denoising to selected assays
   observeEvent(input$apply_denoise, {
     req(state$dslt)
@@ -1387,10 +1535,10 @@ server <- function(input, output, session) {
             })
           }
         }
+      }
 
       # 1. 尝试保存对象
       tryCatch({
-        
         # 2. 将所有对象打包到一个列表中
         snapshot_data <- list(
           sc_rna = state$seurat$sc_rna,
@@ -1398,27 +1546,26 @@ server <- function(input, output, session) {
           pb_rna = state$seurat$pb_rna,
           dslt = state$dslt
         )
-        
+
         # 3. 创建一个带时间戳的唯一文件名
         timestamp <- format(Sys.time(), "%Y-%m-%d_%H%M%S")
         filename <- paste0("qc_snapshot_", timestamp, ".rds")
-        
+
         # 4. 保存到文件
         saveRDS(snapshot_data, file = filename)
-        
+
         # 5. (可选) 通知用户保存成功
         # (如果您使用的是 server.R，showNotification 已经可用)
         showNotification(
-          paste("QC snapshot saved to server at:", filename), 
-          type = "message", 
+          paste("QC snapshot saved to server at:", filename),
+          type = "message",
           duration = 5
         )
-        
       }, error = function(e) {
         # 6. (可选) 保存失败时发出警告
         showNotification(
-          paste("Failed to save QC snapshot:", e$message), 
-          type = "error", 
+          paste("Failed to save QC snapshot:", e$message),
+          type = "error",
           duration = 10
         )
       })

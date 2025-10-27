@@ -755,6 +755,8 @@ performArchetypeAndAnnotate <- function(dslt,
                                         worker_count = 20,
                                         projected_count = 4) {
   if (levels == "lineage") {
+    active_sample_ids <- rownames(dslt[["assays"]][["lineage"]][[smoothed_assay_name]])
+    dslt$setActiveSamples(active_sample_ids)
     archetype_input <- as.data.frame(dslt[["assays"]][["lineage"]][[smoothed_assay_name]])
     archetype_input <- scale2(archetype_input, center = center_flag, scale = scale_flag)
     archetype_results <- find_params_and_perform_arch(archetype_input,
@@ -764,6 +766,8 @@ performArchetypeAndAnnotate <- function(dslt,
     dslt[["embeddings"]][["lineage"]][[smoothed_assay_name]][["archetype_alpha"]] <- archetype_results$A
     dslt[["columnMetadata"]][["lineage"]][[smoothed_assay_name]][["archetypes"]] <- t(archetype_results$BY)
   } else {
+    active_sample_ids <- rownames(dslt[["assays"]][["single_cell"]][[smoothed_assay_name]])
+    dslt$setActiveSamples(active_sample_ids)
     archetype_input <- as.data.frame(dslt[["assays"]][["single_cell"]][[smoothed_assay_name]])
     archetype_input <- scale2(archetype_input, center = center_flag, scale = scale_flag)
     archetype_results <- find_params_and_perform_arch(archetype_input,
@@ -795,6 +799,9 @@ runKnnAnalysisAndStore <- function(dslt,
                                    gamma_value = 1,
                                    min_neighbor_count = 10) {
   if (levels == "lineage") {
+    active_sample_ids <- rownames(dslt[["assays"]][["lineage"]][[smoothed_assay_name]])
+    dslt$setActiveSamples(active_sample_ids)
+
     lineage_assay <- dslt[["assays"]][["lineage"]][[smoothed_assay_name]]
     knn_results_object <- runKnnAnalysis(as.matrix(lineage_assay),
                                         k_neighbors_prop = k_neighbors_prop_value,
@@ -826,6 +833,9 @@ runKnnAnalysisAndStore <- function(dslt,
     rownames(umap_df) <- rownames(dist_snn)
     dslt[["embeddings"]][["lineage"]][[smoothed_assay_name]][["umap"]] <- umap_df
   } else {
+    active_sample_ids <- rownames(dslt[["assays"]][["single_cell"]][[smoothed_assay_name]])
+    dslt$setActiveSamples(active_sample_ids)
+    
     single_cell_assay <- dslt[["assays"]][["single_cell"]][[smoothed_assay_name]]
     knn_results_object <- runKnnAnalysis(as.matrix(single_cell_assay),
                                         k_neighbors_prop = k_neighbors_prop_value,

@@ -326,7 +326,36 @@ ui <- dashboardPage(
             )
           )
         ),
-        
+
+        fluidRow(
+          column(
+            width = 12,
+            box(
+              title = tagList(icon("save"), "QC Snapshot"),
+              width = NULL,
+              solidHeader = TRUE,
+              status = "success",
+              div(
+                class = "upload-section",
+                h4(icon("history"), "Restore Previous Session"),
+                fileInput(
+                  "qc_snapshot_file",
+                  "QC snapshot (.rds)",
+                  accept = c(".rds", ".RDS"),
+                  buttonLabel = "Browse...",
+                  placeholder = "No file selected"
+                ),
+                helpText("Load a previously saved QC snapshot to restore processed data without re-running uploads or QC."),
+                div(class = "status-text", textOutput("qc_snapshot_status")),
+                div(
+                  class = "action-buttons",
+                  actionButton("load_qc_snapshot", tagList(icon("redo"), "Load Snapshot"), class = "btn-success")
+                )
+              )
+            )
+          )
+        ),
+
         # Upload Summary Section
         fluidRow(
           box(
