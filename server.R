@@ -220,164 +220,6 @@ ensure_tabix_index <- function(fragments_path) {
     FALSE
   })
 
-  observeEvent(input$load_supplements, {
-    withProgress(message = "Loading supplement files...", value = 0, {
-      tryCatch({
-        incProgress(0.05, detail = "Initializing...")
-
-        state$seurat$sc_rna_raw <- NULL
-        state$seurat$sc_rna <- NULL
-        state$seurat$pb_rna <- NULL
-        state$seurat$sc_atac_raw <- NULL
-        state$seurat$sc_atac <- NULL
-        state$seurat$pb_atac <- NULL
-        state$mapping <- list(rna = NULL, atac = NULL)
-        state$metadata$atac <- NULL
-        state$qc_applied <- FALSE
-
-        incProgress(0.1, detail = "Checking RNA inputs...")
-
-        if (has_uploaded_files(input$single_cell_rna_rds_file)) {
-          incProgress(0.1, detail = "Reading RNA Seurat object...")
-          sc_rna <- tryCatch(readRDS(input$single_cell_rna_rds_file$datapath), error = function(e) {
-            showNotification(paste("Failed to read RNA RDS:", e$message), type = "error", duration = 5)
-            stop(e$message)
-          })
-          if (!inherits(sc_rna, "Seurat")) {
-            stop("The provided RNA RDS does not contain a Seurat object.")
-          }
-          state$seurat$sc_rna_raw <- sc_rna
-          showNotification("RNA Seurat object loaded successfully", type = "message", duration = 3)
-        } else if (has_uploaded_files(input$single_cell_rna_matrix_files)) {
-          incProgress(0.1, detail = "Reading RNA matrix files...")
-          rna_counts <- read_10x_from_upload(input$single_cell_rna_matrix_files)
-          if (!is.null(rna_counts)) {
-            incProgress(0.05, detail = "Creating RNA Seurat object...")
-            sc_rna <- create_rna_seurat(matrix_data = rna_counts)
-            state$seurat$sc_rna_raw <- sc_rna
-            showNotification("RNA matrix loaded successfully", type = "message", duration = 3)
-          }
-        } else {
-          incProgress(0.15, detail = "No RNA inputs provided.")
-        }
-
-        incProgress(0.1, detail = "Checking ATAC inputs...")
-
-        atac_rds_provided <- has_uploaded_files(input$single_cell_atac_rds_file)
-        atac_matrix_provided <- has_uploaded_files(input$single_cell_atac_matrix_files)
-        atac_fragments_provided <- has_uploaded_files(input$single_cell_atac_fragments_file) &&
-          any(grepl("\\.(tsv|tsv\\.gz)$", tolower(input$single_cell_atac_fragments_file$name)))
-
-        if (atac_rds_provided) {
-          incProgress(0.1, detail = "Reading ATAC Seurat object...")
-          sc_atac <- tryCatch(readRDS(input$single_cell_atac_rds_file$datapath), error = function(e) {
-            showNotification(paste("Failed to read ATAC RDS:", e$message), type = "error", duration = 5)
-            stop(e$message)
-          })
-          if (!inherits(sc_atac, "Seurat")) {
-            stop("The provided ATAC RDS does not contain a Seurat object.")
-          }
-          state$seurat$sc_atac_raw <- sc_atac
-          showNotification("ATAC Seurat object loaded successfully", type = "message", duration = 3)
-        } else if (atac_matrix_provided && atac_fragments_provided) {
-          incProgress(0.1, detail = "Reading ATAC matrix files...")
-          atac_counts <- read_10x_from_upload(input$single_cell_atac_matrix_files)
-
-          incProgress(0.1, detail = "Processing fragments file...")
-          fragments_info <- preserve_fragments_with_index(input$single_cell_atac_fragments_file)
-          fragments_path <- fragments_info$fragments
-          if (is.null(fragments_path)) {
-            stop("Fragments file missing from upload.")
-          }
-          ensure_tabix_index(fragments_path)
-
-          atac_metadata <- NULL
-          if (has_uploaded_files(input$single_cell_atac_metadata_file)) {
-            incProgress(0.05, detail = "Reading ATAC metadata...")
-            atac_metadata <- tryCatch({
-              read.csv(
-                file = input$single_cell_atac_metadata_file$datapath,
-                header = TRUE,
-                row.names = 1,
-                check.names = FALSE,
-                stringsAsFactors = FALSE
-              )
-            }, error = function(e) {
-              showNotification(paste("Failed to read ATAC metadata:", e$message), type = "error", duration = 5)
-              NULL
-            })
-            if (!is.null(atac_metadata)) {
-              atac_metadata <- as.data.frame(atac_metadata, stringsAsFactors = FALSE)
-              state$metadata$atac <- atac_metadata
-              showNotification("ATAC metadata loaded successfully", type = "message", duration = 3)
-            }
-          }
-
-          incProgress(0.1, detail = "Creating ATAC Seurat object...")
-          sc_atac <- create_atac_seurat(
-            counts_data = atac_counts,
-            fragments_file = fragments_path,
-            metadata = state$metadata$atac
-          )
-          state$seurat$sc_atac_raw <- sc_atac
-          showNotification("ATAC data loaded successfully", type = "message", duration = 3)
-        } else if (atac_matrix_provided || atac_fragments_provided) {
-          incProgress(0.2, detail = "ATAC files incomplete, skipping...")
-          showNotification("Both ATAC matrix and fragments files are required for ATAC processing.", type = "warning", duration = 5)
-        } else {
-          incProgress(0.2, detail = "No ATAC inputs provided.")
-        }
-
-        incProgress(0.05, detail = "Reading mapping files...")
-
-        if (has_uploaded_files(input$lineage_rna_mapping_file)) {
-          state$mapping$rna <- read_mapping_file(input$lineage_rna_mapping_file$datapath)
-          showNotification("RNA mapping file loaded", type = "message", duration = 2)
-        }
-        if (has_uploaded_files(input$single_cell_atac_mapping_file)) {
-          state$mapping$atac <- read_mapping_file(input$single_cell_atac_mapping_file$datapath)
-          showNotification("ATAC mapping file loaded", type = "message", duration = 2)
-        }
-
-        incProgress(0.05, detail = "Processing external drug matrix...")
-
-        if (has_uploaded_files(input$drug_matrix_file)) {
-          validate(need(!is.null(state$dslt), "Load lineage data before integrating external drug matrix."))
-          state$drug_matrix <- normalize_matrix(read_table_like(input$drug_matrix_file$datapath))
-          state$dslt[["assays"]][["lineage"]][["external_drug"]] <- state$drug_matrix
-          state$lineage_drug_values <- state$dslt[["assays"]][["lineage"]]
-          drug_matrix_text("External drug matrix integrated.")
-          updatePickerInput(session, "lineage_drug_select", choices = extract_drug_choices(state$lineage_drug_values))
-          showNotification("External drug matrix integrated", type = "message", duration = 3)
-        }
-
-        incProgress(0.05, detail = "Finalizing...")
-
-        if (!is.null(state$seurat$sc_rna_raw) || !is.null(state$seurat$sc_atac_raw)) {
-          single_cell_status("Single-cell inputs loaded. Apply QC to generate pseudo-bulk lineage data.")
-        } else {
-          single_cell_status("No single-cell inputs loaded.")
-        }
-
-        output$upload_summary <- renderText(compose_upload_summary(state))
-        showNotification("Supplement files loaded successfully!", type = "message", duration = 5)
-      }, error = function(e) {
-        showNotification(paste("Failed to load supplements:", e$message), type = "error", duration = 8)
-      })
-    })
-  })
-
-  observeEvent(input$clear_single_cell, {
-    state$seurat$sc_rna_raw <- NULL
-    state$seurat$sc_rna <- NULL
-    state$seurat$sc_atac_raw <- NULL
-    state$seurat$sc_atac <- NULL
-    state$mapping <- list(rna = NULL, atac = NULL)
-    state$metadata$atac <- NULL
-    single_cell_status("Single-cell inputs cleared from memory.")
-    output$upload_summary <- renderText(compose_upload_summary(state))
-  })
-
   success
 }
 
@@ -938,6 +780,164 @@ server <- function(input, output, session) {
     } else if (is.null(state$drug_matrix)) {
       drug_matrix_text("Optional: upload external drug matrix.")
     }
+  })
+
+  observeEvent(input$load_supplements, {
+    withProgress(message = "Loading supplement files...", value = 0, {
+      tryCatch({
+        incProgress(0.05, detail = "Initializing...")
+
+        state$seurat$sc_rna_raw <- NULL
+        state$seurat$sc_rna <- NULL
+        state$seurat$pb_rna <- NULL
+        state$seurat$sc_atac_raw <- NULL
+        state$seurat$sc_atac <- NULL
+        state$seurat$pb_atac <- NULL
+        state$mapping <- list(rna = NULL, atac = NULL)
+        state$metadata$atac <- NULL
+        state$qc_applied <- FALSE
+
+        incProgress(0.1, detail = "Checking RNA inputs...")
+
+        if (has_uploaded_files(input$single_cell_rna_rds_file)) {
+          incProgress(0.1, detail = "Reading RNA Seurat object...")
+          sc_rna <- tryCatch(readRDS(input$single_cell_rna_rds_file$datapath), error = function(e) {
+            showNotification(paste("Failed to read RNA RDS:", e$message), type = "error", duration = 5)
+            stop(e$message)
+          })
+          if (!inherits(sc_rna, "Seurat")) {
+            stop("The provided RNA RDS does not contain a Seurat object.")
+          }
+          state$seurat$sc_rna_raw <- sc_rna
+          showNotification("RNA Seurat object loaded successfully", type = "message", duration = 3)
+        } else if (has_uploaded_files(input$single_cell_rna_matrix_files)) {
+          incProgress(0.1, detail = "Reading RNA matrix files...")
+          rna_counts <- read_10x_from_upload(input$single_cell_rna_matrix_files)
+          if (!is.null(rna_counts)) {
+            incProgress(0.05, detail = "Creating RNA Seurat object...")
+            sc_rna <- create_rna_seurat(matrix_data = rna_counts)
+            state$seurat$sc_rna_raw <- sc_rna
+            showNotification("RNA matrix loaded successfully", type = "message", duration = 3)
+          }
+        } else {
+          incProgress(0.15, detail = "No RNA inputs provided.")
+        }
+
+        incProgress(0.1, detail = "Checking ATAC inputs...")
+
+        atac_rds_provided <- has_uploaded_files(input$single_cell_atac_rds_file)
+        atac_matrix_provided <- has_uploaded_files(input$single_cell_atac_matrix_files)
+        atac_fragments_provided <- has_uploaded_files(input$single_cell_atac_fragments_file) &&
+          any(grepl("\\.(tsv|tsv\\.gz)$", tolower(input$single_cell_atac_fragments_file$name)))
+
+        if (atac_rds_provided) {
+          incProgress(0.1, detail = "Reading ATAC Seurat object...")
+          sc_atac <- tryCatch(readRDS(input$single_cell_atac_rds_file$datapath), error = function(e) {
+            showNotification(paste("Failed to read ATAC RDS:", e$message), type = "error", duration = 5)
+            stop(e$message)
+          })
+          if (!inherits(sc_atac, "Seurat")) {
+            stop("The provided ATAC RDS does not contain a Seurat object.")
+          }
+          state$seurat$sc_atac_raw <- sc_atac
+          showNotification("ATAC Seurat object loaded successfully", type = "message", duration = 3)
+        } else if (atac_matrix_provided && atac_fragments_provided) {
+          incProgress(0.1, detail = "Reading ATAC matrix files...")
+          atac_counts <- read_10x_from_upload(input$single_cell_atac_matrix_files)
+
+          incProgress(0.1, detail = "Processing fragments file...")
+          fragments_info <- preserve_fragments_with_index(input$single_cell_atac_fragments_file)
+          fragments_path <- fragments_info$fragments
+          if (is.null(fragments_path)) {
+            stop("Fragments file missing from upload.")
+          }
+          ensure_tabix_index(fragments_path)
+
+          atac_metadata <- NULL
+          if (has_uploaded_files(input$single_cell_atac_metadata_file)) {
+            incProgress(0.05, detail = "Reading ATAC metadata...")
+            atac_metadata <- tryCatch({
+              read.csv(
+                file = input$single_cell_atac_metadata_file$datapath,
+                header = TRUE,
+                row.names = 1,
+                check.names = FALSE,
+                stringsAsFactors = FALSE
+              )
+            }, error = function(e) {
+              showNotification(paste("Failed to read ATAC metadata:", e$message), type = "error", duration = 5)
+              NULL
+            })
+            if (!is.null(atac_metadata)) {
+              atac_metadata <- as.data.frame(atac_metadata, stringsAsFactors = FALSE)
+              state$metadata$atac <- atac_metadata
+              showNotification("ATAC metadata loaded successfully", type = "message", duration = 3)
+            }
+          }
+
+          incProgress(0.1, detail = "Creating ATAC Seurat object...")
+          sc_atac <- create_atac_seurat(
+            counts_data = atac_counts,
+            fragments_file = fragments_path,
+            metadata = state$metadata$atac
+          )
+          state$seurat$sc_atac_raw <- sc_atac
+          showNotification("ATAC data loaded successfully", type = "message", duration = 3)
+        } else if (atac_matrix_provided || atac_fragments_provided) {
+          incProgress(0.2, detail = "ATAC files incomplete, skipping...")
+          showNotification("Both ATAC matrix and fragments files are required for ATAC processing.", type = "warning", duration = 5)
+        } else {
+          incProgress(0.2, detail = "No ATAC inputs provided.")
+        }
+
+        incProgress(0.05, detail = "Reading mapping files...")
+
+        if (has_uploaded_files(input$lineage_rna_mapping_file)) {
+          state$mapping$rna <- read_mapping_file(input$lineage_rna_mapping_file$datapath)
+          showNotification("RNA mapping file loaded", type = "message", duration = 2)
+        }
+        if (has_uploaded_files(input$single_cell_atac_mapping_file)) {
+          state$mapping$atac <- read_mapping_file(input$single_cell_atac_mapping_file$datapath)
+          showNotification("ATAC mapping file loaded", type = "message", duration = 2)
+        }
+
+        incProgress(0.05, detail = "Processing external drug matrix...")
+
+        if (has_uploaded_files(input$drug_matrix_file)) {
+          validate(need(!is.null(state$dslt), "Load lineage data before integrating external drug matrix."))
+          state$drug_matrix <- normalize_matrix(read_table_like(input$drug_matrix_file$datapath))
+          state$dslt[["assays"]][["lineage"]][["external_drug"]] <- state$drug_matrix
+          state$lineage_drug_values <- state$dslt[["assays"]][["lineage"]]
+          drug_matrix_text("External drug matrix integrated.")
+          updatePickerInput(session, "lineage_drug_select", choices = extract_drug_choices(state$lineage_drug_values))
+          showNotification("External drug matrix integrated", type = "message", duration = 3)
+        }
+
+        incProgress(0.05, detail = "Finalizing...")
+
+        if (!is.null(state$seurat$sc_rna_raw) || !is.null(state$seurat$sc_atac_raw)) {
+          single_cell_status("Single-cell inputs loaded. Apply QC to generate pseudo-bulk lineage data.")
+        } else {
+          single_cell_status("No single-cell inputs loaded.")
+        }
+
+        output$upload_summary <- renderText(compose_upload_summary(state))
+        showNotification("Supplement files loaded successfully!", type = "message", duration = 5)
+      }, error = function(e) {
+        showNotification(paste("Failed to load supplements:", e$message), type = "error", duration = 8)
+      })
+    })
+  })
+
+  observeEvent(input$clear_single_cell, {
+    state$seurat$sc_rna_raw <- NULL
+    state$seurat$sc_rna <- NULL
+    state$seurat$sc_atac_raw <- NULL
+    state$seurat$sc_atac <- NULL
+    state$mapping <- list(rna = NULL, atac = NULL)
+    state$metadata$atac <- NULL
+    single_cell_status("Single-cell inputs cleared from memory.")
+    output$upload_summary <- renderText(compose_upload_summary(state))
   })
 
   observeEvent(input$lineage_rds_file, {
