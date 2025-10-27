@@ -1355,7 +1355,7 @@ server <- function(input, output, session) {
 
       if (length(removed_inputs)) {
         single_cell_status(glue::glue(
-          "Pseudo-bulk data generated; single-cell {paste(removed_inputs, collapse = " and ")} objects removed from memory."
+          'Pseudo-bulk data generated; single-cell {paste(removed_inputs, collapse = " and ")} objects removed from memory.'
         ))
       } else if (had_single_inputs) {
         single_cell_status("Single-cell inputs processed without mapping; provide barcode mapping to create pseudo-bulk data.")
