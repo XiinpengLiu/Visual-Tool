@@ -572,7 +572,7 @@ filter_cells_by_suffix <- function(obj, suffix = "-1$") {
   return(obj)
 }
 
-map_lineage_to_single_cell <- function(dslt, mapping, assays = NULL, umi_col = "UMI") {
+map_lineage_to_single_cell <- function(dslt, mapping, assays = NULL, umi_col = "UMI", suffix = NULL) {
   lineage_assays <- dslt[["assays"]][["lineage"]]
 
   available_assays <- names(lineage_assays)
@@ -596,8 +596,30 @@ map_lineage_to_single_cell <- function(dslt, mapping, assays = NULL, umi_col = "
     ,
     drop = FALSE
   ]
+
+  if (!is.null(suffix) && nzchar(suffix)) {
+    keep_cells <- grepl(suffix, mapping[["cell_barcode"]])
+    mapping <- mapping[keep_cells, , drop = FALSE]
+    if (nrow(mapping) == 0) {
+      empty_assays <- lapply(lineage_assays[assays_to_process], function(mat) {
+        mat <- as.matrix(mat)
+        empty_mat <- mat[0, , drop = FALSE]
+        empty_df <- as.data.frame(empty_mat)
+        rownames(empty_df) <- rownames(empty_mat)
+        colnames(empty_df) <- colnames(empty_mat)
+        empty_df
+      })
+      existing_single_cell <- dslt[["assays"]][["single_cell"]]
+      if (is.null(existing_single_cell)) {
+        existing_single_cell <- list()
+      }
+      existing_single_cell[assays_to_process] <- empty_assays
+      dslt[["assays"]][["single_cell"]] <- existing_single_cell
+      return(dslt)
+    }
+  }
   mapping[[umi_col]] <- as.character(mapping[[umi_col]])
-  
+
   umi_counts <- stats::aggregate(
     mapping[[umi_col]],
     by = list(cell_barcode = mapping[["cell_barcode"]], Barcode = mapping[["Barcode"]]),

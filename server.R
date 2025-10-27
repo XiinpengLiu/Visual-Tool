@@ -1326,7 +1326,7 @@ server <- function(input, output, session) {
       incProgress(0.90, detail = "Mapping drug response to single cells...")
       if (!is.null(state$mapping$rna)) {
         mapping_success <- tryCatch({
-          state$dslt <- map_lineage_to_single_cell(state$dslt, state$mapping$rna)
+          state$dslt <- map_lineage_to_single_cell(state$dslt, state$mapping$rna, suffix = suffix)
           TRUE
         }, error = function(e) {
           showNotification(paste("Failed to map lineage to single-cell:", e$message), type = "warning")
