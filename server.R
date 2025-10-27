@@ -1527,19 +1527,30 @@ server <- function(input, output, session) {
   lineage_knn_plot_obj <- reactive({
     settings <- lineage_plot_settings()
     assay_name <- settings$dataset
-    req(state$qc_applied, assay_name)
+    req(assay_name)
     res <- ensure_knn_embeddings(state, assay_name, level = "lineage")
     validate(need(!is.null(res$coords) && !is.null(res$clusters), "Run KNN analysis on the selected assay."))
-    coords <- as.matrix(res$coords)
-    validate(need(ncol(coords) >= 2, "Embedding requires at least two dimensions."))
-    df <- as.data.frame(coords)
-    names(df)[1:2] <- c("Dim1", "Dim2")
-    df$cluster <- as.factor(res$clusters)
-    ggplot(df, aes(x = Dim1, y = Dim2, color = cluster)) +
-      geom_point(size = 1) +
-      scale_color_manual(values = cluster_palette) +
-      theme_umap_legend +
-      coord_fixed()
+    coords_df <- res$coords %>%
+    rownames_to_column(var = "sequence")
+    clusters_df <- res$clusters %>%
+    rownames_to_column(var = "sequence")
+    plot_data <- left_join(coords_df, clusters_df, by = "sequence")
+    ggplot(plot_data, aes(x = V1, y = V2, color = as.factor(louvain_clusters))) +
+    geom_point(size = 1, alpha = 0.8) + 
+    labs(
+      x = "UMAP 1 (V1)", 
+      y = "UMAP 2 (V2)",  
+      color = "Louvain Cluster"
+    ) +
+    scale_color_manual(values = cluster_palette) +
+    theme_minimal() +
+    theme(
+      axis.title = element_text(size = 12),
+      legend.title = element_text(size = 11, face = "bold"),
+      legend.text = element_text(size = 10)
+    ) +
+    guides(color = guide_legend(override.aes = list(size = 3)))
+
   })
 
   output$lineage_rna_cluster_plot <- renderPlot({ req(lineage_cluster_plot_obj()); lineage_cluster_plot_obj() })
@@ -1608,18 +1619,7 @@ server <- function(input, output, session) {
       cluster_vals <- if ("louvain_clusters" %in% colnames(cluster_df)) cluster_df$louvain_clusters else cluster_df[[1]]
       cluster_vals <- as.factor(cluster_vals)
       mat_df <- as.data.frame(as.matrix(mat))
-      if (is.null(rownames(cluster_df)) && !is.null(rownames(mat_df))) {
-        rownames(cluster_df) <- rownames(mat_df)
-      }
-      if (is.null(rownames(mat_df)) && !is.null(rownames(cluster_df))) {
-        rownames(mat_df) <- rownames(cluster_df)
-      }
-      if (is.null(names(cluster_vals))) {
-        names(cluster_vals) <- rownames(cluster_df)
-      }
-      if (is.null(names(cluster_vals)) && !is.null(rownames(mat_df))) {
-        names(cluster_vals) <- rownames(mat_df)
-      }
+
       summarized_clusters <- summarize_columns(mat_df, cluster_vals, order_rows = TRUE)
       summarized_mat <- as.matrix(summarized_clusters)
       ggshape_heatmap(
@@ -1645,7 +1645,7 @@ server <- function(input, output, session) {
         text.angle.x = 90
       ) + coord_fixed()
     } else {
-      arch <- ensure_archetype_metadata(state, assay_name, level = "lineage")
+      arch <- state$dslt[["columnMetadata"]][["lineage"]][[assay_name]][["archetypes"]]
       validate(need(!is.null(arch), "Archetype metadata not available."))
       arch_mat <- as.matrix(arch)
       values_mat <- t(tanh(arch_mat / 3))
