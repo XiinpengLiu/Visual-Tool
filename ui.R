@@ -543,6 +543,13 @@ ui <- dashboardPage(
               conditionalPanel(
                 condition = "input.lineage_track_mode == 'region'",
                 textInput("lineage_atac_region_input", "Enter chromatin region", value = "chr1 183993-184842")
+              ),
+              div(class = "control-spacer",
+                actionButton(
+                  "lineage_refresh_plots",
+                  tagList(icon("sync"), "Refresh"),
+                  class = "btn-primary btn-block"
+                )
               )
 
             )
@@ -666,6 +673,13 @@ ui <- dashboardPage(
               conditionalPanel(
                 condition = "input.single_track_mode == 'region'",
                 textInput("single_atac_region_input", "Enter chromatin region", value = "chr1 183993-184842")
+              ),
+              div(class = "control-spacer",
+                actionButton(
+                  "single_refresh_plots",
+                  tagList(icon("sync"), "刷新绘图"),
+                  class = "btn-primary btn-block"
+                )
               )
 
             )

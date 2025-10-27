@@ -1371,21 +1371,22 @@ server <- function(input, output, session) {
           if (!nzchar(assay)) {
             next
           }
-          if (is.null(get_dslt_assay_safe(state$dslt, "lineage", assay))) {
-            next
+          for (level in c("lineage", "single_cell")) {
+            if (is.null(get_dslt_assay_safe(state$dslt, level, assay))) {
+              next
+            }
+            tryCatch({
+              ensure_knn_embeddings(state, assay, level = level)
+            }, error = function(e) {
+              showNotification(paste("Failed to compute KNN for", assay, "(", level, "):", e$message), type = "error")
+            })
+            tryCatch({
+              ensure_archetype_metadata(state, assay, level = level)
+            }, error = function(e) {
+              showNotification(paste("Failed to compute archetype analysis for", assay, "(", level, "):", e$message), type = "error")
+            })
           }
-          tryCatch({
-            ensure_knn_embeddings(state, assay, level = "lineage")
-          }, error = function(e) {
-            showNotification(paste("Failed to compute KNN for", assay, ":", e$message), type = "error")
-          })
-          tryCatch({
-            ensure_archetype_metadata(state, assay, level = "lineage")
-          }, error = function(e) {
-            showNotification(paste("Failed to compute archetype analysis for", assay, ":", e$message), type = "error")
-          })
         }
-      }
 
       # 1. 尝试保存对象
       tryCatch({
@@ -1460,13 +1461,36 @@ server <- function(input, output, session) {
   # Helper to obtain plotting reduction ----------------------------------
   # -----------------------------------------------------------------------
 
+  single_plot_settings <- eventReactive(
+    input$single_refresh_plots,
+    {
+      list(
+        reduction = input$single_red_method,
+        clustering = input$single_clustering_method,
+        kmeans_k = input$single_kmeans_input,
+        umap_pca_dims = input$single_umap_pca_dims,
+        tsne_pca_dims = input$single_tsne_pca_dims,
+        umap_svd_dims = input$single_umap_svd_dims,
+        tsne_svd_dims = input$single_tsne_svd_dims,
+        dataset = input$single_rds_object_select,
+        selected_drugs = input$single_drug_select,
+        bubble_mode = input$single_bubble_mode,
+        track_mode = input$single_track_mode,
+        gene_input = input$single_gene_input,
+        region_input = input$single_atac_region_input
+      )
+    },
+    ignoreNULL = FALSE
+  )
+
   single_plot_data <- reactive({
     req(state$qc_applied)
     seu <- state$seurat$sc_rna
     req(seu)
 
-    method <- input$single_red_method
-    clustering <- input$single_clustering_method
+    settings <- single_plot_settings()
+    method <- settings$reduction
+    clustering <- settings$clustering
     reduction <- "pca"
     cluster_col <- "seurat_clusters"
     dims <- seq(1, 30)
@@ -1475,12 +1499,12 @@ server <- function(input, output, session) {
 
     # 先根据降维方法确保降维结果（PCA/UMAP/t-SNE）
     if (method == "umap") {
-      res <- ensure_umap(seu, input$single_umap_pca_dims, dslt = state$dslt, assays = "RNA", level = dslt_level)
+      res <- ensure_umap(seu, settings$umap_pca_dims, dslt = state$dslt, assays = "RNA", level = dslt_level)
       seu <- res$seu
       state$dslt <- res$dslt
       reduction <- res$reduction
     } else if (method == "tsne") {
-      res <- ensure_tsne(seu, input$single_tsne_pca_dims, dslt = state$dslt, assays = "RNA", level = dslt_level)
+      res <- ensure_tsne(seu, settings$tsne_pca_dims, dslt = state$dslt, assays = "RNA", level = dslt_level)
       seu <- res$seu
       state$dslt <- res$dslt
       reduction <- res$reduction
@@ -1494,7 +1518,7 @@ server <- function(input, output, session) {
 
     # 再根据聚类方法确保聚类列
     if (clustering == "kmeans") {
-      res <- ensure_kmeans_clusters(seu, input$single_kmeans_input, dims = dims, dslt = state$dslt, assays = "RNA", level = dslt_level)
+      res <- ensure_kmeans_clusters(seu, settings$kmeans_k, dims = dims, dslt = state$dslt, assays = "RNA", level = dslt_level)
       seu <- res$seu
       state$dslt <- res$dslt
       cluster_col <- res$column
@@ -1515,8 +1539,9 @@ server <- function(input, output, session) {
     seu <- state$seurat$sc_atac
     req(seu)
 
-    method <- input$single_red_method
-    clustering <- input$single_clustering_method
+    settings <- single_plot_settings()
+    method <- settings$reduction
+    clustering <- settings$clustering
     reduction <- "lsi"
     cluster_col <- "seurat_clusters"
     dims <- seq(2, 30)
@@ -1525,12 +1550,12 @@ server <- function(input, output, session) {
 
     # 先根据降维方法确保降维结果（PCA/UMAP/t-SNE）
     if (method == "umap") {
-      res <- ensure_umap(seu, input$single_umap_svd_dims, dslt = state$dslt, assays = "ATAC", level = dslt_level)
+      res <- ensure_umap(seu, settings$umap_svd_dims, dslt = state$dslt, assays = "ATAC", level = dslt_level)
       seu <- res$seu
       state$dslt <- res$dslt
       reduction <- res$reduction
     } else if (method == "tsne") {
-      res <- ensure_tsne(seu, input$single_umap_svd_dims, dslt = state$dslt, assays = "ATAC", level = dslt_level)
+      res <- ensure_tsne(seu, settings$umap_svd_dims, dslt = state$dslt, assays = "ATAC", level = dslt_level)
       seu <- res$seu
       state$dslt <- res$dslt
       reduction <- res$reduction
@@ -1543,7 +1568,7 @@ server <- function(input, output, session) {
 
     # 再根据聚类方法确保聚类列
     if (clustering == "kmeans") {
-      res <- ensure_kmeans_clusters(seu, input$single_kmeans_input, dims = dims, dslt = state$dslt, assays = "ATAC", level = dslt_level)
+      res <- ensure_kmeans_clusters(seu, settings$kmeans_k, dims = dims, dslt = state$dslt, assays = "ATAC", level = dslt_level)
       seu <- res$seu
       state$dslt <- res$dslt
       cluster_col <- res$column
@@ -1562,13 +1587,36 @@ server <- function(input, output, session) {
   # -----------------------------------------------------------------------
   # Lineage plots --------------------------------------------------------
   # -----------------------------------------------------------------------
+  lineage_plot_settings <- eventReactive(
+    input$lineage_refresh_plots,
+    {
+      list(
+        reduction = input$lineage_red_method,
+        clustering = input$lineage_clustering_method,
+        kmeans_k = input$lineage_kmeans_input,
+        umap_pca_dims = input$lineage_umap_pca_dims,
+        umap_svd_dims = input$lineage_umap_svd_dims,
+        tsne_pca_dims = input$lineage_tsne_pca_dims,
+        tsne_svd_dims = input$lineage_tsne_svd_dims,
+        dataset = input$lineage_rds_object_select,
+        selected_drugs = input$lineage_drug_select,
+        bubble_mode = input$lineage_bubble_mode,
+        track_mode = input$lineage_track_mode,
+        gene_input = input$lineage_gene_input,
+        region_input = input$lineage_atac_region_input
+      )
+    },
+    ignoreNULL = FALSE
+  )
+
   lineage_cluster_plot_obj <- reactive({
     req(state$qc_applied)
+    settings <- lineage_plot_settings()
     seu <- state$seurat$pb_rna
-    reduction <- input$lineage_red_method
-    cluster_col <- input$lineage_clustering_method
+    reduction <- settings$reduction
+    cluster_col <- settings$clustering
     if (cluster_col == "kmeans") {
-      res <- ensure_kmeans_clusters(seu, input$lineage_kmeans_input, dims = seq(1, 30), dslt = state$dslt, assays = "RNA", level = "lineage")
+      res <- ensure_kmeans_clusters(seu, settings$kmeans_k, dims = seq(1, 30), dslt = state$dslt, assays = "RNA", level = "lineage")
       seu <- res$seu
       state$dslt <- res$dslt
       cluster_col <- res$column
@@ -1584,8 +1632,10 @@ server <- function(input, output, session) {
   })
 
   lineage_knn_plot_obj <- reactive({
-    req(input$lineage_rds_object_select)
-    res <- ensure_knn_embeddings(state, input$lineage_rds_object_select, level = "lineage")
+    settings <- lineage_plot_settings()
+    assay_name <- settings$dataset
+    req(assay_name)
+    res <- ensure_knn_embeddings(state, assay_name, level = "lineage")
     validate(need(!is.null(res$coords) && !is.null(res$clusters), "Run KNN analysis on the selected assay."))
     colored_clusters <- ggscatter_colored(
       res$coords,
@@ -1604,16 +1654,18 @@ server <- function(input, output, session) {
   output$lineage_knn_plot <- renderPlot({ req(lineage_knn_plot_obj()); lineage_knn_plot_obj() })
   
   output$lineage_atac_cluster_plot <- renderPlot({
-  req(state$seurat$pb_atac)   # 只有 pb_atac 存在时才渲染
-  seu <- state$seurat$pb_atac
-  umap_res <- ensure_umap(seu, input$lineage_umap_pca_dims, dslt = NULL, assays = "ATAC", level = "lineage")
-  seu <- umap_res$seu
-  DimPlot(seu, reduction = "umap", group.by = "seurat_clusters", pt.size = 1) + theme_minimal()
+    settings <- lineage_plot_settings()
+    req(state$seurat$pb_atac)   # 只有 pb_atac 存在时才渲染
+    seu <- state$seurat$pb_atac
+    umap_res <- ensure_umap(seu, settings$umap_pca_dims, dslt = NULL, assays = "ATAC", level = "lineage")
+    seu <- umap_res$seu
+    DimPlot(seu, reduction = "umap", group.by = "seurat_clusters", pt.size = 1) + theme_minimal()
   })
 
   lineage_drug_response_plot_obj <- reactive({
+    settings <- lineage_plot_settings()
     req(state$dslt, state$lineage_drug_values)
-    assay_name <- input$lineage_rds_object_select
+    assay_name <- settings$dataset
     req(assay_name)
     res <- ensure_knn_embeddings(state, assay_name, level = "lineage")
     coords <- as.matrix(res$coords)
@@ -1622,7 +1674,7 @@ server <- function(input, output, session) {
     req(!is.null(mat))
     mat <- as.matrix(mat)
     mat <- normalize_matrix(mat)
-    selected_drugs <- intersect(colnames(mat), input$lineage_drug_select)
+    selected_drugs <- intersect(colnames(mat), settings$selected_drugs)
     validate(need(length(selected_drugs) > 0, "Select at least one drug."))
     if (is.null(rownames(coords)) && !is.null(rownames(mat))) {
       rownames(coords) <- rownames(mat)
@@ -1645,10 +1697,11 @@ server <- function(input, output, session) {
   output$lineage_drug_response_plot <- renderPlot({ req(lineage_drug_response_plot_obj()); lineage_drug_response_plot_obj() })
 
   lineage_bubble_plot_obj <- reactive({
-    req(state$dslt, input$lineage_rds_object_select, input$lineage_bubble_mode)
-    assay_name <- input$lineage_rds_object_select
+    settings <- lineage_plot_settings()
+    req(state$dslt, settings$dataset, settings$bubble_mode)
+    assay_name <- settings$dataset
     if (!nzchar(assay_name)) return(NULL)
-    if (input$lineage_bubble_mode == "cluster") {
+    if (settings$bubble_mode == "cluster") {
       res <- ensure_knn_embeddings(state, assay_name, level = "lineage")
       mat <- get_dslt_assay_safe(state$dslt, "lineage", assay_name)
       if (is.null(res$clusters) || is.null(mat)) return(NULL)
@@ -1726,7 +1779,10 @@ server <- function(input, output, session) {
 
   output$lineage_violin_plot <- renderPlot({
     req(state$seurat$pb_rna)
-    features <- if (input$lineage_track_mode == "gene") input$lineage_gene_input else input$lineage_atac_region_input
+    settings <- lineage_plot_settings()
+    track_mode <- settings$track_mode
+    if (is.null(track_mode)) track_mode <- "gene"
+    features <- if (identical(track_mode, "gene")) settings$gene_input else settings$region_input
     if (!nzchar(features)) return(NULL)
     feat_vec <- str_split(features, "[,;\\s]+", simplify = TRUE)
     feat_vec <- feat_vec[feat_vec != ""]
@@ -1769,8 +1825,10 @@ server <- function(input, output, session) {
   })
 
   single_knn_plot_obj <- reactive({
-    req(input$single_rds_object_select)
-    res <- ensure_knn_embeddings(state, input$single_rds_object_select, level = "single_cell")
+    settings <- single_plot_settings()
+    assay_name <- settings$dataset
+    req(assay_name)
+    res <- ensure_knn_embeddings(state, assay_name, level = "single_cell")
     validate(need(!is.null(res$coords) && !is.null(res$clusters), "Run KNN analysis on the selected assay."))
     colored_clusters <- ggscatter_colored(
       res$coords,
@@ -1800,8 +1858,9 @@ server <- function(input, output, session) {
   })
 
   single_drug_response_plot_obj <- reactive({
-    req(input$single_rds_object_select, state$single_drug_values)
-    assay_name <- input$single_rds_object_select
+    settings <- single_plot_settings()
+    req(settings$dataset, state$single_drug_values)
+    assay_name <- settings$dataset
     coords <- NULL
     mat <- NULL
     if (!is.null(state$dslt)) {
@@ -1822,7 +1881,7 @@ server <- function(input, output, session) {
     req(!is.null(coords), !is.null(mat))
     mat <- as.matrix(mat)
     mat <- normalize_matrix(mat)
-    selected_drugs <- intersect(colnames(mat), input$single_drug_select)
+    selected_drugs <- intersect(colnames(mat), settings$selected_drugs)
     validate(need(length(selected_drugs) > 0, "Select at least one drug."))
     mat <- mat[, selected_drugs, drop = FALSE]
     coords <- as.matrix(coords)
@@ -1853,10 +1912,11 @@ server <- function(input, output, session) {
   output$single_drug_response_plot <- renderPlot({ req(single_drug_response_plot_obj()); single_drug_response_plot_obj() })
 
   single_bubble_plot_obj <- reactive({
-    req(state$dslt, input$single_rds_object_select, input$single_bubble_mode)
-    assay_name <- input$single_rds_object_select
+    settings <- single_plot_settings()
+    req(state$dslt, settings$dataset, settings$bubble_mode)
+    assay_name <- settings$dataset
     if (!nzchar(assay_name)) return(NULL)
-    if (input$single_bubble_mode == "cluster") {
+    if (settings$bubble_mode == "cluster") {
       res <- ensure_knn_embeddings(state, assay_name, level = "single_cell")
       mat <- get_dslt_assay_safe(state$dslt, "single_cell", assay_name)
       if (is.null(res$clusters) || is.null(mat)) return(NULL)
@@ -1940,7 +2000,10 @@ server <- function(input, output, session) {
 
   output$single_violin_plot <- renderPlot({
     req(state$seurat$sc_rna)
-    features <- if (input$single_track_mode == "gene") input$single_gene_input else input$single_atac_region_input
+    settings <- single_plot_settings()
+    track_mode <- settings$track_mode
+    if (is.null(track_mode)) track_mode <- "gene"
+    features <- if (identical(track_mode, "gene")) settings$gene_input else settings$region_input
     if (!nzchar(features)) return(NULL)
     feat_vec <- str_split(features, "[,;\\s]+", simplify = TRUE)
     feat_vec <- feat_vec[feat_vec != ""]
