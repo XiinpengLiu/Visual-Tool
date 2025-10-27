@@ -610,7 +610,11 @@ map_lineage_to_single_cell <- function(dslt, mapping, assays = NULL, umi_col = "
     idx <- match(umi_counts[["Barcode"]], rownames(mat))
     keep <- !is.na(idx)
     if (!any(keep)) {
-      return(mat[0, , drop = FALSE])
+      empty_mat <- mat[0, , drop = FALSE]
+      empty_df <- as.data.frame(empty_mat)
+      rownames(empty_df) <- rownames(empty_mat)
+      colnames(empty_df) <- colnames(empty_mat)
+      return(empty_df)
     }
     counts_use <- umi_counts[keep, , drop = FALSE]
     wts <- counts_use[["umi_count"]]
@@ -619,12 +623,26 @@ map_lineage_to_single_cell <- function(dslt, mapping, assays = NULL, umi_col = "
     wsum <- rowsum(wts, counts_use[["cell_barcode"]])
     wsum_vec <- as.numeric(wsum)
     names(wsum_vec) <- rownames(wsum)
-    sweep(summed, 1, wsum_vec, "/")
+    averaged <- sweep(summed, 1, wsum_vec, "/")
+    averaged_df <- as.data.frame(averaged)
+    rownames(averaged_df) <- rownames(averaged)
+    colnames(averaged_df) <- colnames(averaged)
+    averaged_df
   })
 
   existing_single_cell <- dslt[["assays"]][["single_cell"]]
   if (is.null(existing_single_cell)) {
     existing_single_cell <- list()
+  } else {
+    existing_single_cell <- lapply(existing_single_cell, function(entry) {
+      if (is.matrix(entry) || is.data.frame(entry)) {
+        df <- as.data.frame(entry)
+        rownames(df) <- rownames(entry)
+        colnames(df) <- colnames(entry)
+        return(df)
+      }
+      entry
+    })
   }
 
   existing_single_cell[assays_to_process] <- single_cell_assays
@@ -643,10 +661,19 @@ initializeDsltFromLmm <- function(output_dir,threshold = 2e-5) {
   lmm_result_path <- output_dir
   lmm_result_object <- readRDS(lmm_result_path)
   dslt <- DatasetLT$new()
-  dslt[["assays"]][["lineage"]] <- lmm_result_object$result
+  dslt[["assays"]][["lineage"]] <- lapply(lmm_result_object$result, function(entry) {
+    if (is.matrix(entry) || is.data.frame(entry)) {
+      df <- as.data.frame(entry)
+      rownames(df) <- rownames(entry)
+      colnames(df) <- colnames(entry)
+      return(df)
+    }
+    entry
+  })
   rm(lmm_result_object)
   dslt$printLayerNames()
-  fraction_assay <- dslt$getAssay("lineage", "fraction")
+  fraction_assays <- dslt[["assays"]][["lineage"]]
+  fraction_assay <- fraction_assays[["fraction"]]
   fraction_assay <- as.matrix(fraction_assay)
   active_sample_ids <- rownames(fraction_assay)[(matrixStats::rowMaxs(fraction_assay) > threshold)]
   dslt$setActiveSamples(active_sample_ids)
@@ -672,13 +699,18 @@ applyAdaptiveKernelDenoising <- function(dslt,
                                          snn_threshold_prop_value = 0.2,
                                          gamma_value = 1) {
   smoothed_assay_name <- paste0(assay_name, "_smoothed")                                        
-  scaled_matrix <- scale2(dslt$getAssay("lineage",assay_name), center = center_flag, scale = scale_flag)
+  lineage_assays <- dslt[["assays"]][["lineage"]]
+  assay_data <- lineage_assays[[assay_name]]
+  scaled_matrix <- scale2(as.matrix(assay_data), center = center_flag, scale = scale_flag)
   KD_mat <- AdaptiveKernelDenoizing(scaled_matrix,
                                      use_ica = TRUE,
                                      k_neighbors_prop = k_neighbors_prop_value,
                                      snn_threshold_prop = snn_threshold_prop_value,
                                      gamma = gamma_value)
-  dslt[["assays"]][["lineage"]][[smoothed_assay_name]] <- KD_mat
+  KD_df <- as.data.frame(KD_mat)
+  rownames(KD_df) <- rownames(KD_mat)
+  colnames(KD_df) <- colnames(KD_mat)
+  dslt[["assays"]][["lineage"]][[smoothed_assay_name]] <- KD_df
   list(dslt = dslt, smoothed_assay_name = smoothed_assay_name)
 }
 
@@ -701,7 +733,7 @@ performArchetypeAndAnnotate <- function(dslt,
                                         worker_count = 20,
                                         projected_count = 4) {
   if (levels == "lineage") {
-    archetype_input <- as.data.frame(dslt$getAssay("lineage", smoothed_assay_name))
+    archetype_input <- as.data.frame(dslt[["assays"]][["lineage"]][[smoothed_assay_name]])
     archetype_input <- scale2(archetype_input, center = center_flag, scale = scale_flag)
     archetype_results <- find_params_and_perform_arch(archetype_input,
                                                       kappa = kappa_value,
@@ -710,7 +742,7 @@ performArchetypeAndAnnotate <- function(dslt,
     dslt[["embeddings"]][["lineage"]][[smoothed_assay_name]][["archetype_alpha"]] <- archetype_results$A
     dslt[["columnMetadata"]][["lineage"]][[smoothed_assay_name]][["archetypes"]] <- t(archetype_results$BY)
   } else {
-    archetype_input <- as.data.frame(dslt$getAssay("single_cell", smoothed_assay_name))
+    archetype_input <- as.data.frame(dslt[["assays"]][["single_cell"]][[smoothed_assay_name]])
     archetype_input <- scale2(archetype_input, center = center_flag, scale = scale_flag)
     archetype_results <- find_params_and_perform_arch(archetype_input,
                                                       kappa = kappa_value,
@@ -741,23 +773,67 @@ runKnnAnalysisAndStore <- function(dslt,
                                    gamma_value = 1,
                                    min_neighbor_count = 10) {
   if (levels == "lineage") {
-    knn_results_object <- runKnnAnalysis(dslt$getAssay("lineage", smoothed_assay_name, force = TRUE),
+    lineage_assay <- dslt[["assays"]][["lineage"]][[smoothed_assay_name]]
+    knn_results_object <- runKnnAnalysis(as.matrix(lineage_assay),
                                         k_neighbors_prop = k_neighbors_prop_value,
                                         snn_threshold_prop = snn_threshold_prop_value,
                                         gamma = gamma_value)
-    dslt[["graphs"]][["lineage"]][[smoothed_assay_name]] <- knn_results_object[c("similarity_full", "similarity_snn", "adjacency_snn", "distance_matrix")]
+    graph_components <- knn_results_object[c("similarity_full", "similarity_snn", "adjacency_snn", "distance_matrix")]
+    graph_components <- lapply(graph_components, function(mat) {
+      if (is.null(mat)) {
+        return(NULL)
+      }
+      mat_df <- as.data.frame(mat)
+      if (!is.null(rownames(mat))) {
+        rownames(mat_df) <- rownames(mat)
+      }
+      if (!is.null(colnames(mat))) {
+        colnames(mat_df) <- colnames(mat)
+      }
+      mat_df
+    })
+    dslt[["graphs"]][["lineage"]][[smoothed_assay_name]] <- graph_components
     dslt[["embeddings"]][["lineage"]][[smoothed_assay_name]][["louvain_clusters"]] <- data.frame(louvain_clusters = (knn_results_object[[c("louvain_clusters")]] ))
-    dslt[["graphs"]][["lineage"]][[smoothed_assay_name]][["dist_snn"]] <- distance_form_similarity_log(dslt[["graphs"]][["lineage"]][[smoothed_assay_name]][["similarity_snn"]])
-    dslt[["embeddings"]][["lineage"]][[smoothed_assay_name]][["umap"]] <- uwot::umap(dslt[["graphs"]][["lineage"]][[smoothed_assay_name]][["dist_snn"]], n_neighbors = 150)
+    dist_snn <- distance_form_similarity_log(as.matrix(dslt[["graphs"]][["lineage"]][[smoothed_assay_name]][["similarity_snn"]]))
+    dist_snn_df <- as.data.frame(dist_snn)
+    rownames(dist_snn_df) <- rownames(dist_snn)
+    colnames(dist_snn_df) <- colnames(dist_snn)
+    dslt[["graphs"]][["lineage"]][[smoothed_assay_name]][["dist_snn"]] <- dist_snn_df
+    umap_embedding <- uwot::umap(dist_snn, n_neighbors = 150)
+    umap_df <- as.data.frame(umap_embedding)
+    rownames(umap_df) <- rownames(dist_snn)
+    dslt[["embeddings"]][["lineage"]][[smoothed_assay_name]][["umap"]] <- umap_df
   } else {
-    knn_results_object <- runKnnAnalysis(dslt$getAssay("single_cell", smoothed_assay_name, force = TRUE),
+    single_cell_assay <- dslt[["assays"]][["single_cell"]][[smoothed_assay_name]]
+    knn_results_object <- runKnnAnalysis(as.matrix(single_cell_assay),
                                         k_neighbors_prop = k_neighbors_prop_value,
                                         snn_threshold_prop = snn_threshold_prop_value,
                                         gamma = gamma_value)
-    dslt[["graphs"]][["single_cell"]][[smoothed_assay_name]] <- knn_results_object[c("similarity_full", "similarity_snn", "adjacency_snn", "distance_matrix")]
+    graph_components <- knn_results_object[c("similarity_full", "similarity_snn", "adjacency_snn", "distance_matrix")]
+    graph_components <- lapply(graph_components, function(mat) {
+      if (is.null(mat)) {
+        return(NULL)
+      }
+      mat_df <- as.data.frame(mat)
+      if (!is.null(rownames(mat))) {
+        rownames(mat_df) <- rownames(mat)
+      }
+      if (!is.null(colnames(mat))) {
+        colnames(mat_df) <- colnames(mat)
+      }
+      mat_df
+    })
+    dslt[["graphs"]][["single_cell"]][[smoothed_assay_name]] <- graph_components
     dslt[["embeddings"]][["single_cell"]][[smoothed_assay_name]][["louvain_clusters"]] <- data.frame(louvain_clusters = (knn_results_object[[c("louvain_clusters")]] ))
-    dslt[["graphs"]][["single_cell"]][[smoothed_assay_name]][["dist_snn"]] <- distance_form_similarity_log(dslt[["graphs"]][["single_cell"]][[smoothed_assay_name]][["similarity_snn"]])
-    dslt[["embeddings"]][["single_cell"]][[smoothed_assay_name]][["umap"]] <- uwot::umap(dslt[["graphs"]][["single_cell"]][[smoothed_assay_name]][["dist_snn"]], n_neighbors = 150)
+    dist_snn <- distance_form_similarity_log(as.matrix(dslt[["graphs"]][["single_cell"]][[smoothed_assay_name]][["similarity_snn"]]))
+    dist_snn_df <- as.data.frame(dist_snn)
+    rownames(dist_snn_df) <- rownames(dist_snn)
+    colnames(dist_snn_df) <- colnames(dist_snn)
+    dslt[["graphs"]][["single_cell"]][[smoothed_assay_name]][["dist_snn"]] <- dist_snn_df
+    umap_embedding <- uwot::umap(dist_snn, n_neighbors = 150)
+    umap_df <- as.data.frame(umap_embedding)
+    rownames(umap_df) <- rownames(dist_snn)
+    dslt[["embeddings"]][["single_cell"]][[smoothed_assay_name]][["umap"]] <- umap_df
   }
   dslt
 }
@@ -772,7 +848,10 @@ update_dslt_embedding <- function(dslt, assays, level, name, embedding) {
     if (is.null(embeddings)) embeddings <- list()
     if (is.null(embeddings[[assays]])) embeddings[[assays]] <- list()
     if (is.null(embeddings[[assays]][[level]])) embeddings[[assays]][[level]] <- list()
-    embeddings[[assays]][[level]][[name]] <- embedding
+    embedding_df <- as.data.frame(embedding)
+    rownames(embedding_df) <- rownames(embedding)
+    colnames(embedding_df) <- colnames(embedding)
+    embeddings[[assays]][[level]][[name]] <- embedding_df
     dslt$embeddings <- embeddings
     dslt
   }, error = function(e) {

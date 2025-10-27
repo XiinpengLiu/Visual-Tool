@@ -293,7 +293,11 @@ get_drug_scores <- function(assays, assay_name, drugs) {
 }
 
 get_dslt_embedding_safe <- function(dslt, level, assay_name, slot) {
-  res <- tryCatch({
+  if (is.null(dslt) || !nzchar(level) || !nzchar(assay_name) || !nzchar(slot)) {
+    return(NULL)
+  }
+
+  tryCatch({
     embeddings <- dslt[["embeddings"]]
     if (is.null(embeddings)) return(NULL)
     level_embeddings <- embeddings[[level]]
@@ -302,16 +306,20 @@ get_dslt_embedding_safe <- function(dslt, level, assay_name, slot) {
     if (is.null(assay_embeddings)) return(NULL)
     assay_embeddings[[slot]]
   }, error = function(e) NULL)
-  if (!is.null(res)) {
-    return(res)
-  }
-  tryCatch(dslt$getEmbedding(level, assay_name, slot), error = function(e) {
-    tryCatch(dslt$getEmbedding(assay_name, slot), error = function(e2) NULL)
-  })
 }
 
 get_dslt_assay_safe <- function(dslt, level, assay_name) {
-  tryCatch(dslt$getAssay(level, assay_name, force = TRUE), error = function(e) NULL)
+  if (is.null(dslt) || !nzchar(level) || !nzchar(assay_name)) {
+    return(NULL)
+  }
+
+  tryCatch({
+    assays <- dslt[["assays"]]
+    if (is.null(assays)) return(NULL)
+    level_assays <- assays[[level]]
+    if (is.null(level_assays)) return(NULL)
+    level_assays[[assay_name]]
+  }, error = function(e) NULL)
 }
 
 get_dslt_column_metadata_safe <- function(dslt, assay_name, field, level = NULL) {
