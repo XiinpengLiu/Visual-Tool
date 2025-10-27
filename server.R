@@ -220,6 +220,164 @@ ensure_tabix_index <- function(fragments_path) {
     FALSE
   })
 
+  observeEvent(input$load_supplements, {
+    withProgress(message = "Loading supplement files...", value = 0, {
+      tryCatch({
+        incProgress(0.05, detail = "Initializing...")
+
+        state$seurat$sc_rna_raw <- NULL
+        state$seurat$sc_rna <- NULL
+        state$seurat$pb_rna <- NULL
+        state$seurat$sc_atac_raw <- NULL
+        state$seurat$sc_atac <- NULL
+        state$seurat$pb_atac <- NULL
+        state$mapping <- list(rna = NULL, atac = NULL)
+        state$metadata$atac <- NULL
+        state$qc_applied <- FALSE
+
+        incProgress(0.1, detail = "Checking RNA inputs...")
+
+        if (has_uploaded_files(input$single_cell_rna_rds_file)) {
+          incProgress(0.1, detail = "Reading RNA Seurat object...")
+          sc_rna <- tryCatch(readRDS(input$single_cell_rna_rds_file$datapath), error = function(e) {
+            showNotification(paste("Failed to read RNA RDS:", e$message), type = "error", duration = 5)
+            stop(e$message)
+          })
+          if (!inherits(sc_rna, "Seurat")) {
+            stop("The provided RNA RDS does not contain a Seurat object.")
+          }
+          state$seurat$sc_rna_raw <- sc_rna
+          showNotification("RNA Seurat object loaded successfully", type = "message", duration = 3)
+        } else if (has_uploaded_files(input$single_cell_rna_matrix_files)) {
+          incProgress(0.1, detail = "Reading RNA matrix files...")
+          rna_counts <- read_10x_from_upload(input$single_cell_rna_matrix_files)
+          if (!is.null(rna_counts)) {
+            incProgress(0.05, detail = "Creating RNA Seurat object...")
+            sc_rna <- create_rna_seurat(matrix_data = rna_counts)
+            state$seurat$sc_rna_raw <- sc_rna
+            showNotification("RNA matrix loaded successfully", type = "message", duration = 3)
+          }
+        } else {
+          incProgress(0.15, detail = "No RNA inputs provided.")
+        }
+
+        incProgress(0.1, detail = "Checking ATAC inputs...")
+
+        atac_rds_provided <- has_uploaded_files(input$single_cell_atac_rds_file)
+        atac_matrix_provided <- has_uploaded_files(input$single_cell_atac_matrix_files)
+        atac_fragments_provided <- has_uploaded_files(input$single_cell_atac_fragments_file) &&
+          any(grepl("\\.(tsv|tsv\\.gz)$", tolower(input$single_cell_atac_fragments_file$name)))
+
+        if (atac_rds_provided) {
+          incProgress(0.1, detail = "Reading ATAC Seurat object...")
+          sc_atac <- tryCatch(readRDS(input$single_cell_atac_rds_file$datapath), error = function(e) {
+            showNotification(paste("Failed to read ATAC RDS:", e$message), type = "error", duration = 5)
+            stop(e$message)
+          })
+          if (!inherits(sc_atac, "Seurat")) {
+            stop("The provided ATAC RDS does not contain a Seurat object.")
+          }
+          state$seurat$sc_atac_raw <- sc_atac
+          showNotification("ATAC Seurat object loaded successfully", type = "message", duration = 3)
+        } else if (atac_matrix_provided && atac_fragments_provided) {
+          incProgress(0.1, detail = "Reading ATAC matrix files...")
+          atac_counts <- read_10x_from_upload(input$single_cell_atac_matrix_files)
+
+          incProgress(0.1, detail = "Processing fragments file...")
+          fragments_info <- preserve_fragments_with_index(input$single_cell_atac_fragments_file)
+          fragments_path <- fragments_info$fragments
+          if (is.null(fragments_path)) {
+            stop("Fragments file missing from upload.")
+          }
+          ensure_tabix_index(fragments_path)
+
+          atac_metadata <- NULL
+          if (has_uploaded_files(input$single_cell_atac_metadata_file)) {
+            incProgress(0.05, detail = "Reading ATAC metadata...")
+            atac_metadata <- tryCatch({
+              read.csv(
+                file = input$single_cell_atac_metadata_file$datapath,
+                header = TRUE,
+                row.names = 1,
+                check.names = FALSE,
+                stringsAsFactors = FALSE
+              )
+            }, error = function(e) {
+              showNotification(paste("Failed to read ATAC metadata:", e$message), type = "error", duration = 5)
+              NULL
+            })
+            if (!is.null(atac_metadata)) {
+              atac_metadata <- as.data.frame(atac_metadata, stringsAsFactors = FALSE)
+              state$metadata$atac <- atac_metadata
+              showNotification("ATAC metadata loaded successfully", type = "message", duration = 3)
+            }
+          }
+
+          incProgress(0.1, detail = "Creating ATAC Seurat object...")
+          sc_atac <- create_atac_seurat(
+            counts_data = atac_counts,
+            fragments_file = fragments_path,
+            metadata = state$metadata$atac
+          )
+          state$seurat$sc_atac_raw <- sc_atac
+          showNotification("ATAC data loaded successfully", type = "message", duration = 3)
+        } else if (atac_matrix_provided || atac_fragments_provided) {
+          incProgress(0.2, detail = "ATAC files incomplete, skipping...")
+          showNotification("Both ATAC matrix and fragments files are required for ATAC processing.", type = "warning", duration = 5)
+        } else {
+          incProgress(0.2, detail = "No ATAC inputs provided.")
+        }
+
+        incProgress(0.05, detail = "Reading mapping files...")
+
+        if (has_uploaded_files(input$lineage_rna_mapping_file)) {
+          state$mapping$rna <- read_mapping_file(input$lineage_rna_mapping_file$datapath)
+          showNotification("RNA mapping file loaded", type = "message", duration = 2)
+        }
+        if (has_uploaded_files(input$single_cell_atac_mapping_file)) {
+          state$mapping$atac <- read_mapping_file(input$single_cell_atac_mapping_file$datapath)
+          showNotification("ATAC mapping file loaded", type = "message", duration = 2)
+        }
+
+        incProgress(0.05, detail = "Processing external drug matrix...")
+
+        if (has_uploaded_files(input$drug_matrix_file)) {
+          validate(need(!is.null(state$dslt), "Load lineage data before integrating external drug matrix."))
+          state$drug_matrix <- normalize_matrix(read_table_like(input$drug_matrix_file$datapath))
+          state$dslt[["assays"]][["lineage"]][["external_drug"]] <- state$drug_matrix
+          state$lineage_drug_values <- state$dslt[["assays"]][["lineage"]]
+          drug_matrix_text("External drug matrix integrated.")
+          updatePickerInput(session, "lineage_drug_select", choices = extract_drug_choices(state$lineage_drug_values))
+          showNotification("External drug matrix integrated", type = "message", duration = 3)
+        }
+
+        incProgress(0.05, detail = "Finalizing...")
+
+        if (!is.null(state$seurat$sc_rna_raw) || !is.null(state$seurat$sc_atac_raw)) {
+          single_cell_status("Single-cell inputs loaded. Apply QC to generate pseudo-bulk lineage data.")
+        } else {
+          single_cell_status("No single-cell inputs loaded.")
+        }
+
+        output$upload_summary <- renderText(compose_upload_summary(state))
+        showNotification("Supplement files loaded successfully!", type = "message", duration = 5)
+      }, error = function(e) {
+        showNotification(paste("Failed to load supplements:", e$message), type = "error", duration = 8)
+      })
+    })
+  })
+
+  observeEvent(input$clear_single_cell, {
+    state$seurat$sc_rna_raw <- NULL
+    state$seurat$sc_rna <- NULL
+    state$seurat$sc_atac_raw <- NULL
+    state$seurat$sc_atac <- NULL
+    state$mapping <- list(rna = NULL, atac = NULL)
+    state$metadata$atac <- NULL
+    single_cell_status("Single-cell inputs cleared from memory.")
+    output$upload_summary <- renderText(compose_upload_summary(state))
+  })
+
   success
 }
 
@@ -279,6 +437,46 @@ update_export_history <- function(state, action) {
 extract_drug_choices <- function(assay_list) {
   if (is.null(assay_list)) return(character())
   unique(unlist(lapply(assay_list, colnames)))
+}
+
+compose_upload_summary <- function(state) {
+  lineage_status <- if (is.null(state$dslt)) "Not loaded" else "Loaded"
+  sc_rna_status <- if (!is.null(state$seurat$pb_rna)) {
+    "Pseudo-bulk ready"
+  } else if (!is.null(state$seurat$sc_rna_raw)) {
+    "Uploaded"
+  } else {
+    "Not uploaded"
+  }
+  sc_atac_status <- if (!is.null(state$seurat$pb_atac)) {
+    "Pseudo-bulk ready"
+  } else if (!is.null(state$seurat$sc_atac_raw)) {
+    "Uploaded"
+  } else {
+    "Not uploaded"
+  }
+  mapping_status <- if (!is.null(state$mapping$rna) || !is.null(state$mapping$atac)) "Provided" else "Not provided"
+  drug_matrix_status <- if (is.null(state$drug_matrix)) "Not provided" else "Provided"
+  denoised_status <- if (length(state$denoised_assays)) paste(state$denoised_assays, collapse = ", ") else "None"
+
+  ready <- c()
+  if (!is.null(state$seurat$pb_rna)) ready <- c(ready, "RNA")
+  if (!is.null(state$seurat$pb_atac)) ready <- c(ready, "ATAC")
+
+  lines <- c(
+    paste("Lineage data:", lineage_status),
+    paste("Single-cell RNA:", sc_rna_status),
+    paste("Single-cell ATAC:", sc_atac_status),
+    paste("Mapping files:", mapping_status),
+    paste("External drug matrix:", drug_matrix_status),
+    paste("Denoised assays:", denoised_status)
+  )
+
+  if (length(ready)) {
+    lines <- c(lines, paste("Pseudo-bulk generated for:", paste(ready, collapse = ", ")))
+  }
+
+  paste(lines, collapse = "\n")
 }
 
 get_drug_scores <- function(assays, assay_name, drugs) {
@@ -363,8 +561,8 @@ get_dslt_column_metadata_safe <- function(dslt, assay_name, field, level = NULL)
   NULL
 }
 
-ensure_archetype_metadata <- function(state, assay_name, level = c("lineage", "single_cell")) {
-  level <- match.arg(level)
+ensure_archetype_metadata <- function(state, assay_name, level = "lineage") {
+  stopifnot(identical(level, "lineage"))
   if (is.null(state$dslt) || !nzchar(assay_name)) {
     return(NULL)
   }
@@ -388,7 +586,7 @@ ensure_archetype_metadata <- function(state, assay_name, level = c("lineage", "s
       state$dslt <- dslt_result
     } else if (is.matrix(dslt_result) || is.data.frame(dslt_result)) {
       arch <- as.matrix(dslt_result)
-      level_key <- if (identical(level, "lineage")) "lineage" else "single_cell"
+  level_key <- "lineage"
       if (is.null(state$dslt[["columnMetadata"]])) state$dslt[["columnMetadata"]] <- list()
       if (is.null(state$dslt[["columnMetadata"]][[level_key]])) state$dslt[["columnMetadata"]][[level_key]] <- list()
       if (is.null(state$dslt[["columnMetadata"]][[level_key]][[assay_name]])) {
@@ -401,9 +599,9 @@ ensure_archetype_metadata <- function(state, assay_name, level = c("lineage", "s
   get_dslt_column_metadata_safe(state$dslt, assay_name, "archetypes", level = level)
 }
 
-ensure_knn_embeddings <- function(state, assay_name, level = c("lineage", "single_cell")) {
+ensure_knn_embeddings <- function(state, assay_name, level = "lineage") {
   if (is.null(state$dslt) || !nzchar(assay_name)) return(list(coords = NULL, clusters = NULL))
-  level <- match.arg(level)
+  stopifnot(identical(level, "lineage"))
   assay_present <- !is.null(get_dslt_assay_safe(state$dslt, level, assay_name))
   if (!assay_present) {
     return(list(coords = NULL, clusters = NULL))
@@ -448,7 +646,7 @@ get_dimensional_reduction <- function(assays) {
   }
 }
 
-ensure_pca <- function(seu, dslt = NULL, npcs = 30, assays = "RNA", level = "single cell") {
+ensure_pca <- function(seu, dslt = NULL, npcs = 30, assays = "RNA", level = "lineage") {
   reduction <- get_dimensional_reduction(assays)
   needs_reduction <- !reduction %in% names(Reductions(seu))
   if (!needs_reduction) {
@@ -469,7 +667,7 @@ ensure_pca <- function(seu, dslt = NULL, npcs = 30, assays = "RNA", level = "sin
   list(seu = seu, dslt = dslt)
 }
 
-ensure_umap <- function(seu, dims, dslt = NULL, assays = "RNA", level = "single cell", reduction_name = "umap") {
+ensure_umap <- function(seu, dims, dslt = NULL, assays = "RNA", level = "lineage", reduction_name = "umap") {
   dims_seq <- seq(dims[1], dims[2])
   pca_res <- ensure_pca(seu, dslt = dslt, npcs = max(dims_seq), assays = assays, level = level)
   seu <- pca_res$seu
@@ -492,7 +690,7 @@ ensure_umap <- function(seu, dims, dslt = NULL, assays = "RNA", level = "single 
   list(seu = seu, reduction = reduction_name, dslt = dslt)
 }
 
-ensure_tsne <- function(seu, dims, dslt = NULL, assays = "RNA", level = "single cell", reduction_name = "tsne") {
+ensure_tsne <- function(seu, dims, dslt = NULL, assays = "RNA", level = "lineage", reduction_name = "tsne") {
   dims_seq <- seq(dims[1], dims[2])
   pca_res <- ensure_pca(seu, dslt = dslt, npcs = max(dims_seq), assays = assays, level = level)
   seu <- pca_res$seu
@@ -515,7 +713,7 @@ ensure_tsne <- function(seu, dims, dslt = NULL, assays = "RNA", level = "single 
   list(seu = seu, reduction = reduction_name, dslt = dslt)
 }
 
-ensure_clusters <- function(seu, dslt = NULL, res = 0.8, dims = 1:30, assays = "RNA", level = "single cell") {
+ensure_clusters <- function(seu, dslt = NULL, res = 0.8, dims = 1:30, assays = "RNA", level = "lineage") {
   dims_seq <- seq(dims[1], dims[length(dims)])
   pca_res <- ensure_pca(seu, dslt = dslt, npcs = max(dims_seq), assays = assays, level = level)
   seu <- pca_res$seu
@@ -542,7 +740,7 @@ ensure_clusters <- function(seu, dslt = NULL, res = 0.8, dims = 1:30, assays = "
   list(seu = seu, dslt = dslt)
 }
 
-ensure_kmeans_clusters <- function(seu, k, res = 0.5, dims = 1:30, dslt = NULL, assays = "RNA", level = "single cell") {
+ensure_kmeans_clusters <- function(seu, k, res = 0.5, dims = 1:30, dslt = NULL, assays = "RNA", level = "lineage") {
   k <- max(2, as.integer(k))
   dims_seq <- seq(dims[1], dims[length(dims)])
   cluster_res <- ensure_clusters(seu,
@@ -578,20 +776,8 @@ server <- function(input, output, session) {
   state <- reactiveValues(
     dslt = NULL,
     denoised_assays = character(),
-    seurat = list(
-      sc_rna_raw = NULL,
-      sc_rna = NULL,
-      sc_atac_raw = NULL,
-      sc_atac = NULL,
-      pb_rna = NULL,
-      pb_atac = NULL
-    ),
-    mapping = list(rna = NULL, atac = NULL),
     drug_matrix = NULL,
     lineage_drug_values = NULL,
-    single_drug_values = NULL,
-    lineage_cell_counts = NULL,
-    single_cell_counts = NULL,
     qc = list(
       rna_violin = NULL,
       rna_scatter = NULL,
@@ -604,7 +790,18 @@ server <- function(input, output, session) {
     ),
     qc_applied = FALSE,
     export_history = data.frame(timestamp = character(), action = character(), stringsAsFactors = FALSE),
-    metadata = list(rna = NULL, atac = NULL)
+    seurat = list(
+      sc_rna_raw = NULL,
+      sc_rna = NULL,
+      sc_atac_raw = NULL,
+      sc_atac = NULL,
+      pb_rna = NULL,
+      pb_atac = NULL
+    ),
+    mapping = list(rna = NULL, atac = NULL),
+    metadata = list(rna = NULL, atac = NULL),
+    single_cell_counts = NULL,
+    lineage_cell_counts = NULL
   )
 
   # -----------------------------------------------------------------------
@@ -615,85 +812,137 @@ server <- function(input, output, session) {
     !is.null(info) && nrow(info) > 0
   }
 
-  output$single_cell_upload_status <- renderText({
+  single_cell_status <- reactiveVal("Awaiting single-cell uploads.")
+  rna_matrix_status <- reactiveVal("Upload RNA matrix files (matrix.mtx, features.tsv, barcodes.tsv) or provide a preprocessed RDS object.")
+  rna_rds_status <- reactiveVal("Optional: upload a preprocessed single-cell RNA Seurat object (.rds).")
+  atac_matrix_status <- reactiveVal("Upload ATAC matrix files (matrix.mtx, peaks.tsv, barcodes.tsv) or provide a preprocessed RDS object.")
+  atac_rds_status <- reactiveVal("Optional: upload a preprocessed single-cell ATAC Seurat object (.rds).")
+  atac_fragments_status <- reactiveVal("Awaiting ATAC fragments file.")
+  atac_metadata_status <- reactiveVal("Optional: upload ATAC metadata CSV with cell barcodes as row names.")
+  rna_mapping_status <- reactiveVal("Optional: upload RNA barcode mapping file.")
+  atac_mapping_status <- reactiveVal("Optional: upload ATAC barcode mapping file.")
+  drug_matrix_text <- reactiveVal("Optional: upload external drug matrix.")
+
+  output$single_cell_upload_status <- renderText(single_cell_status())
+  output$single_cell_upload_rna_matrix_status <- renderText(rna_matrix_status())
+  output$single_cell_rna_rds_status <- renderText(rna_rds_status())
+  output$single_cell_upload_atac_matrix_status <- renderText(atac_matrix_status())
+  output$single_cell_atac_rds_status <- renderText(atac_rds_status())
+  output$single_cell_atac_fragments_status <- renderText(atac_fragments_status())
+  output$single_cell_atac_metadata_status <- renderText(atac_metadata_status())
+  output$lineage_rna_mapping_status <- renderText(rna_mapping_status())
+  output$single_cell_atac_mapping_status <- renderText(atac_mapping_status())
+  output$drug_matrix_status <- renderText(drug_matrix_text())
+  output$qc_snapshot_status <- renderText("Upload a QC snapshot to restore a previous session.")
+
+  observe({
+    info <- input$single_cell_rna_matrix_files
+    if (has_uploaded_files(info)) {
+      rna_matrix_status("Single-cell RNA matrix files uploaded.")
+    } else {
+      rna_matrix_status("Upload RNA matrix files (matrix.mtx, features.tsv, barcodes.tsv) or provide a preprocessed RDS object.")
+    }
+  })
+
+  observe({
+    info <- input$single_cell_rna_rds_file
+    if (has_uploaded_files(info)) {
+      rna_rds_status("Preprocessed single-cell RNA Seurat object uploaded.")
+    } else {
+      rna_rds_status("Optional: upload a preprocessed single-cell RNA Seurat object (.rds).")
+    }
+  })
+
+  observe({
+    info <- input$single_cell_atac_matrix_files
+    if (has_uploaded_files(info)) {
+      atac_matrix_status("Single-cell ATAC matrix files uploaded.")
+    } else {
+      atac_matrix_status("Upload ATAC matrix files (matrix.mtx, peaks.tsv, barcodes.tsv) or provide a preprocessed RDS object.")
+    }
+  })
+
+  observe({
+    info <- input$single_cell_atac_rds_file
+    if (has_uploaded_files(info)) {
+      atac_rds_status("Preprocessed single-cell ATAC Seurat object uploaded.")
+    } else {
+      atac_rds_status("Optional: upload a preprocessed single-cell ATAC Seurat object (.rds).")
+    }
+  })
+
+  observe({
+    info <- input$single_cell_atac_fragments_file
+    if (has_uploaded_files(info)) {
+      lower_names <- tolower(info$name)
+      if (any(grepl("\\.tbi(\\.gz)?$", lower_names))) {
+        atac_fragments_status("ATAC fragments and index files uploaded.")
+      } else {
+        atac_fragments_status("ATAC fragments file uploaded. A matching .tbi index will be generated when possible.")
+      }
+    } else {
+      atac_fragments_status("Awaiting ATAC fragments file.")
+    }
+  })
+
+  observe({
+    info <- input$single_cell_atac_metadata_file
+    if (has_uploaded_files(info)) {
+      atac_metadata_status("ATAC metadata CSV uploaded.")
+    } else {
+      atac_metadata_status("Optional: upload ATAC metadata CSV with cell barcodes as row names.")
+    }
+  })
+
+  observe({
+    info <- input$lineage_rna_mapping_file
+    if (has_uploaded_files(info)) {
+      rna_mapping_status("RNA barcode mapping uploaded.")
+    } else {
+      rna_mapping_status("Optional: upload RNA barcode mapping file.")
+    }
+  })
+
+  observe({
+    info <- input$single_cell_atac_mapping_file
+    if (has_uploaded_files(info)) {
+      atac_mapping_status("ATAC barcode mapping uploaded.")
+    } else {
+      atac_mapping_status("Optional: upload ATAC barcode mapping file.")
+    }
+  })
+
+  observe({
+    if (!is.null(state$seurat$pb_rna) || !is.null(state$seurat$pb_atac)) {
+      return()
+    }
     rna_ready <- has_uploaded_files(input$single_cell_rna_matrix_files) ||
       has_uploaded_files(input$single_cell_rna_rds_file)
     atac_ready <- has_uploaded_files(input$single_cell_atac_matrix_files) ||
       has_uploaded_files(input$single_cell_atac_rds_file)
+
     if (rna_ready && atac_ready) {
-      "Single-cell RNA and ATAC inputs detected."
+      single_cell_status("Single-cell RNA and ATAC inputs detected.")
     } else if (rna_ready) {
-      "Single-cell RNA inputs detected. Upload ATAC inputs if needed."
+      single_cell_status("Single-cell RNA inputs detected. Upload ATAC inputs if needed.")
     } else if (atac_ready) {
-      "Single-cell ATAC inputs detected. Upload RNA inputs if needed."
+      single_cell_status("Single-cell ATAC inputs detected. Upload RNA inputs if needed.")
     } else {
-      "Awaiting single-cell uploads."
+      single_cell_status("Awaiting single-cell uploads.")
     }
   })
-  output$single_cell_upload_rna_matrix_status <- renderText({
-    if (has_uploaded_files(input$single_cell_rna_matrix_files)) {
-      "Single-cell RNA matrix files uploaded."
-    } else {
-      "Upload RNA matrix files (matrix.mtx, features.tsv, barcodes.tsv) or provide a preprocessed RDS object."
+
+  observe({
+    if (has_uploaded_files(input$drug_matrix_file)) {
+      drug_matrix_text("External drug matrix uploaded.")
+    } else if (is.null(state$drug_matrix)) {
+      drug_matrix_text("Optional: upload external drug matrix.")
     }
   })
-  output$single_cell_rna_rds_status <- renderText({
-    if (has_uploaded_files(input$single_cell_rna_rds_file)) {
-      "Preprocessed single-cell RNA Seurat object uploaded."
-    } else {
-      "Optional: upload a preprocessed single-cell RNA Seurat object (.rds)."
-    }
-  })
-  output$single_cell_upload_atac_matrix_status <- renderText({
-    if (has_uploaded_files(input$single_cell_atac_matrix_files)) {
-      "Single-cell ATAC matrix files uploaded."
-    } else {
-      "Upload ATAC matrix files (matrix.mtx, peaks.tsv, barcodes.tsv) or provide a preprocessed RDS object."
-    }
-  })
-  output$single_cell_atac_rds_status <- renderText({
-    if (has_uploaded_files(input$single_cell_atac_rds_file)) {
-      "Preprocessed single-cell ATAC Seurat object uploaded."
-    } else {
-      "Optional: upload a preprocessed single-cell ATAC Seurat object (.rds)."
-    }
-  })
-  output$single_cell_atac_fragments_status <- renderText({
-    if (has_uploaded_files(input$single_cell_atac_fragments_file)) {
-      lower_names <- tolower(input$single_cell_atac_fragments_file$name)
-      if (any(grepl("\\.tbi(\\.gz)?$", lower_names))) {
-        "ATAC fragments and index files uploaded."
-      } else {
-        "ATAC fragments file uploaded. The matching .tbi index will be generated automatically when possible."
-      }
-    } else {
-      "Awaiting ATAC fragments file."
-    }
-  })
-  output$single_cell_atac_metadata_status <- renderText({
-    if (has_uploaded_files(input$single_cell_atac_metadata_file)) {
-      "ATAC metadata CSV uploaded."
-    } else {
-      "Optional: upload ATAC metadata CSV with cell barcodes as row names."
-    }
-  })
-  output$lineage_rna_mapping_status <- renderText("Optional: upload RNA barcode mapping file.")
-  output$single_cell_atac_mapping_status <- renderText("Optional: upload ATAC barcode mapping file.")
-  output$qc_snapshot_status <- renderText("Upload a QC snapshot to restore a previous session.")
 
   observeEvent(input$lineage_rds_file, {
     req(input$lineage_rds_file)
     output$lineage_upload_status <- renderText("Lineage data ready for loading.")
-  })
-
-  observeEvent(input$lineage_rna_mapping_file, {
-    req(input$lineage_rna_mapping_file)
-    output$lineage_rna_mapping_status <- renderText("RNA barcode mapping uploaded.")
-  })
-
-  observeEvent(input$single_cell_atac_mapping_file, {
-    req(input$single_cell_atac_mapping_file)
-    output$single_cell_atac_mapping_status <- renderText("ATAC barcode mapping uploaded.")
   })
 
   observeEvent(input$qc_snapshot_file, {
@@ -750,14 +999,7 @@ server <- function(input, output, session) {
         
         showNotification("Lineage RDS file loaded successfully!", type = "message")
         
-        output$upload_summary <- renderText({
-          paste(
-            "Lineage data: Loaded",
-            "\nAvailable assays:", paste(lineage_assays, collapse = ", "),
-            "\nDenoised assays: None (apply denoising if needed)",
-            "\nNote: Load supplements and apply QC to enable full functionality."
-          )
-        })
+        output$upload_summary <- renderText(compose_upload_summary(state))
         
       }, error = function(e) {
         showNotification(paste("Failed to load lineage RDS:", e$message), type = "error")
@@ -765,234 +1007,27 @@ server <- function(input, output, session) {
     })
   })
   
-  # Button 2: Load optional supplement files
-  observeEvent(input$load_supplements, {
-    withProgress(message = "Loading supplement files...", value = 0, {
-      tryCatch({
-        incProgress(0.05, detail = "Initializing...")
-        
-        # Reset single-cell related state
-        state$seurat <- modifyList(state$seurat, list(
-          sc_rna_raw = NULL,
-          sc_atac_raw = NULL,
-          sc_rna = NULL,
-          sc_atac = NULL,
-          pb_rna = NULL,
-          pb_atac = NULL
-        ))
-        state$qc_applied <- FALSE
-        state$single_drug_values <- NULL
-        state$metadata$atac <- NULL
-
-        incProgress(0.05, detail = "Checking RNA files...")
-
-        rna_rds_provided <- has_uploaded_files(input$single_cell_rna_rds_file)
-        rna_matrix_provided <- has_uploaded_files(input$single_cell_rna_matrix_files)
-
-        if (rna_rds_provided) {
-          incProgress(0.1, detail = "Reading RNA Seurat object...")
-          sc_rna <- tryCatch({
-            readRDS(input$single_cell_rna_rds_file$datapath)
-          }, error = function(e) {
-            showNotification(paste("Failed to read RNA RDS:", e$message), type = "error", duration = 5)
-            stop(e$message)
-          })
-
-          if (!inherits(sc_rna, "Seurat")) {
-            showNotification("The provided RNA RDS does not contain a Seurat object.", type = "error", duration = 5)
-            stop("Invalid RNA Seurat object")
-          }
-
-          incProgress(0.1, detail = "Validating RNA Seurat object...")
-          state$seurat$sc_rna_raw <- sc_rna
-          showNotification("RNA Seurat object loaded successfully", type = "message", duration = 3)
-        } else if (rna_matrix_provided) {
-          incProgress(0.1, detail = "Reading RNA matrix files...")
-          rna_counts <- read_10x_from_upload(input$single_cell_rna_matrix_files)
-
-          if (!is.null(rna_counts)) {
-            incProgress(0.1, detail = "Creating RNA Seurat object...")
-            sc_rna <- create_rna_seurat(matrix_data = rna_counts)
-            state$seurat$sc_rna_raw <- sc_rna
-            showNotification("RNA matrix loaded successfully", type = "message", duration = 3)
-          }
-        } else {
-          incProgress(0.2, detail = "No RNA inputs provided, skipping...")
-        }
-
-        incProgress(0.05, detail = "Checking ATAC files...")
-
-        atac_rds_provided <- has_uploaded_files(input$single_cell_atac_rds_file)
-        atac_matrix_provided <- has_uploaded_files(input$single_cell_atac_matrix_files)
-        atac_fragments_provided <- has_uploaded_files(input$single_cell_atac_fragments_file) &&
-          any(grepl("\\.(tsv|tsv\\.gz)$", tolower(input$single_cell_atac_fragments_file$name)))
-
-        if (atac_rds_provided) {
-          incProgress(0.1, detail = "Reading ATAC Seurat object...")
-          sc_atac <- tryCatch({
-            readRDS(input$single_cell_atac_rds_file$datapath)
-          }, error = function(e) {
-            showNotification(paste("Failed to read ATAC RDS:", e$message), type = "error", duration = 5)
-            stop(e$message)
-          })
-
-          if (!inherits(sc_atac, "Seurat")) {
-            showNotification("The provided ATAC RDS does not contain a Seurat object.", type = "error", duration = 5)
-            stop("Invalid ATAC Seurat object")
-          }
-
-          incProgress(0.2, detail = "Validating ATAC Seurat object...")
-          state$seurat$sc_atac_raw <- sc_atac
-          showNotification("ATAC Seurat object loaded successfully", type = "message", duration = 3)
-        } else if (atac_matrix_provided && atac_fragments_provided) {
-          incProgress(0.1, detail = "Reading ATAC matrix files (this may take a while)...")
-          atac_counts <- read_10x_from_upload(input$single_cell_atac_matrix_files)
-
-          incProgress(0.1, detail = "Processing fragments file...")
-          fragments_info <- preserve_fragments_with_index(input$single_cell_atac_fragments_file)
-          fragments_path <- fragments_info$fragments
-
-          if (is.null(fragments_path)) {
-            stop("Fragments file missing from upload.")
-          }
-
-          incProgress(0.1, detail = "Verifying/generating tabix index...")
-          index_ready <- ensure_tabix_index(fragments_path)
-          if (!index_ready) {
-            showNotification(
-              "Fragments index (.tbi) not provided and could not be generated. Upload the matching .tbi file.",
-              type = "error",
-              duration = 10
-            )
-          }
-
-          atac_metadata <- NULL
-          if (has_uploaded_files(input$single_cell_atac_metadata_file)) {
-            incProgress(0.05, detail = "Reading ATAC metadata...")
-            atac_metadata <- tryCatch({
-              read.csv(
-                file = input$single_cell_atac_metadata_file$datapath,
-                header = TRUE,
-                row.names = 1,
-                check.names = FALSE,
-                stringsAsFactors = FALSE
-              )
-            }, error = function(e) {
-              showNotification(paste("Failed to read ATAC metadata:", e$message), type = "error", duration = 5)
-              NULL
-            })
-
-            if (!is.null(atac_metadata)) {
-              atac_metadata <- as.data.frame(atac_metadata, stringsAsFactors = FALSE)
-              state$metadata$atac <- atac_metadata
-              showNotification("ATAC metadata loaded successfully", type = "message", duration = 3)
-            }
-          }
-
-          incProgress(0.1, detail = "Creating ATAC Seurat object...")
-          sc_atac <- create_atac_seurat(
-            counts_data = atac_counts,
-            fragments_file = fragments_path,
-            metadata = atac_metadata
-          )
-
-          state$seurat$sc_atac_raw <- sc_atac
-          showNotification("ATAC data loaded successfully", type = "message", duration = 3)
-        } else if (atac_matrix_provided || atac_fragments_provided) {
-          incProgress(0.4, detail = "ATAC files incomplete, skipping...")
-          showNotification(
-            "Both ATAC matrix files and fragments file are required for ATAC processing. ATAC data will be skipped.",
-            type = "warning",
-            duration = 5
-          )
-        } else {
-          incProgress(0.4, detail = "No ATAC inputs provided, skipping...")
-        }
-
-        incProgress(0.05, detail = "Reading mapping files...")
-        
-        # Mapping files
-        if (!is.null(input$lineage_rna_mapping_file)) {
-          incProgress(0.05, detail = "Loading RNA mapping...")
-          state$mapping$rna <- read_mapping_file(input$lineage_rna_mapping_file$datapath)
-          showNotification("RNA mapping file loaded", type = "message", duration = 2)
-        }
-        if (!is.null(input$single_cell_atac_mapping_file)) {
-          incProgress(0.05, detail = "Loading ATAC mapping...")
-          state$mapping$atac <- read_mapping_file(input$single_cell_atac_mapping_file$datapath)
-          showNotification("ATAC mapping file loaded", type = "message", duration = 2)
-        }
-        
-        incProgress(0.05, detail = "Processing drug matrix...")
-        
-        # Additional drug matrix
-        if (!is.null(input$drug_matrix_file)) {
-          req(state$dslt)
-          incProgress(0.05, detail = "Integrating external drug matrix...")
-          state$drug_matrix <- normalize_matrix(read_table_like(input$drug_matrix_file$datapath))
-          state$dslt[["assays"]][["lineage"]][["external_drug"]] <- state$drug_matrix
-          state$lineage_drug_values <- state$dslt[["assays"]][["lineage"]]
-          
-          # Update drug choices
-          drug_choices <- extract_drug_choices(state$lineage_drug_values)
-          updatePickerInput(session, "lineage_drug_select", choices = drug_choices)
-          showNotification("External drug matrix integrated", type = "message", duration = 2)
-        }
-        
-        incProgress(0.05, detail = "Finalizing...")
-        
-        showNotification("All supplement files loaded successfully!", type = "message", duration = 5)
-        
-        output$upload_summary <- renderText({
-          lineage_status <- if (is.null(state$dslt)) "Not loaded" else "Loaded"
-          single_cell_rna_status <- if (is.null(state$seurat$sc_rna_raw)) "Not uploaded" else "Uploaded"
-          single_cell_atac_status <- if (is.null(state$seurat$sc_atac_raw)) "Not uploaded" else "Uploaded"
-          mapping_status <- if (is.null(state$mapping$rna) && is.null(state$mapping$atac)) "Not provided" else "Provided"
-          drug_matrix_status <- if (is.null(state$drug_matrix)) "Not provided" else "Provided"
-          
-          paste(
-            "Lineage data:", lineage_status,
-            "\nSingle-cell RNA:", single_cell_rna_status,
-            "\nSingle-cell ATAC:", single_cell_atac_status,
-            "\nMapping:", mapping_status,
-            "\nExternal drug matrix:", drug_matrix_status,
-            "\nDenoised assays:", ifelse(length(state$denoised_assays), paste(state$denoised_assays, collapse = ", "), "None"),
-            "\nNote: Apply QC settings with RNA mapping to generate single-cell drug data."
-          )
-        })
-        
-      }, error = function(e) {
-        showNotification(paste("Failed to load supplements:", e$message), type = "error")
-      })
-    })
-  })
-
-  observeEvent(input$load_qc_snapshot, {
+    observeEvent(input$load_qc_snapshot, {
     req(input$qc_snapshot_file)
 
     withProgress(message = "Loading QC snapshot...", value = 0, {
       tryCatch({
-        incProgress(0.2, detail = "Reading snapshot file")
+        incProgress(0.3, detail = "Reading snapshot file")
         snapshot <- readRDS(input$qc_snapshot_file$datapath)
 
         validate(need(is.list(snapshot), "Snapshot file must contain a list object."))
         validate(need(!is.null(snapshot$dslt), "Snapshot is missing 'dslt' data."))
 
-        incProgress(0.4, detail = "Restoring processed objects")
-
+        incProgress(0.6, detail = "Restoring lineage data")
         state$dslt <- snapshot$dslt
-
         if (!is.null(snapshot$denoised_assays)) {
           state$denoised_assays <- snapshot$denoised_assays
+        } else {
+          state$denoised_assays <- character()
         }
-
-        if (!is.null(snapshot$sc_rna)) {
-          state$seurat$sc_rna <- snapshot$sc_rna
-          state$seurat$sc_rna_raw <- snapshot$sc_rna
-        }
-        if (!is.null(snapshot$sc_atac)) {
-          state$seurat$sc_atac <- snapshot$sc_atac
-          state$seurat$sc_atac_raw <- snapshot$sc_atac
+        if (!is.null(snapshot$drug_matrix)) {
+          state$drug_matrix <- snapshot$drug_matrix
+          drug_matrix_text("External drug matrix integrated.")
         }
         if (!is.null(snapshot$pb_rna)) {
           state$seurat$pb_rna <- snapshot$pb_rna
@@ -1000,108 +1035,43 @@ server <- function(input, output, session) {
         if (!is.null(snapshot$pb_atac)) {
           state$seurat$pb_atac <- snapshot$pb_atac
         }
-        if (!is.null(snapshot$qc) && is.list(snapshot$qc)) {
-          state$qc <- modifyList(state$qc, snapshot$qc)
-        }
+        state$seurat$sc_rna_raw <- NULL
+        state$seurat$sc_rna <- NULL
+        state$seurat$sc_atac_raw <- NULL
+        state$seurat$sc_atac <- NULL
         if (!is.null(snapshot$mapping) && is.list(snapshot$mapping)) {
           state$mapping <- modifyList(state$mapping, snapshot$mapping)
         }
-        if (!is.null(snapshot$metadata) && is.list(snapshot$metadata)) {
-          state$metadata <- modifyList(state$metadata, snapshot$metadata)
-        }
-
-        incProgress(0.6, detail = "Updating derived state")
-
-        lineage_assays <- NULL
         if (!is.null(state$dslt[["assays"]][["lineage"]])) {
           state$lineage_drug_values <- state$dslt[["assays"]][["lineage"]]
-          lineage_assays <- names(state$lineage_drug_values)
-          if (is.null(snapshot$denoised_assays)) {
-            state$denoised_assays <- lineage_assays[grepl("smoothed", lineage_assays, ignore.case = TRUE)]
-          }
         } else if (!is.null(snapshot$lineage_drug_values)) {
           state$lineage_drug_values <- snapshot$lineage_drug_values
-          lineage_assays <- names(state$lineage_drug_values)
         }
-
-        if (!is.null(snapshot$drug_matrix)) {
-          state$drug_matrix <- snapshot$drug_matrix
+        if (!is.null(snapshot$qc) && is.list(snapshot$qc)) {
+          state$qc <- modifyList(state$qc, snapshot$qc)
         }
-
-        if (!is.null(state$dslt[["assays"]][["single_cell"]])) {
-          state$single_drug_values <- state$dslt[["assays"]][["single_cell"]]
-        } else if (!is.null(snapshot$single_drug_values)) {
-          state$single_drug_values <- snapshot$single_drug_values
-        }
-
-        if (!is.null(state$dslt[["assays"]][["rna_map"]])) {
-          state$lineage_cell_counts <- state$dslt[["assays"]][["rna_map"]]
-        }
-
-        if (!is.null(snapshot$single_cell_counts)) {
-          state$single_cell_counts <- snapshot$single_cell_counts
-        }
-
-        state$qc_applied <- TRUE
 
         incProgress(0.8, detail = "Refreshing selections")
+        lineage_assays <- names(state$lineage_drug_values)
+        updatePickerInput(session, "denoise_assays_choice",
+          choices = lineage_assays,
+          selected = intersect(state$denoised_assays, lineage_assays)
+        )
+        updatePickerInput(session, "lineage_drug_select", choices = extract_drug_choices(state$lineage_drug_values))
+        updatePickerInput(session, "lineage_rds_object_select",
+          choices = lineage_assays,
+          selected = if (length(lineage_assays)) lineage_assays[1] else character(0)
+        )
 
-        if (!is.null(state$lineage_drug_values)) {
-          drug_choices <- extract_drug_choices(state$lineage_drug_values)
-          updatePickerInput(session, "lineage_drug_select", choices = drug_choices)
-
-          dataset_choices <- names(state$lineage_drug_values)
-          if (length(dataset_choices)) {
-            selected_dataset <- dataset_choices[1]
-            if (!is.null(input$lineage_rds_object_select) && input$lineage_rds_object_select %in% dataset_choices) {
-              selected_dataset <- input$lineage_rds_object_select
-            }
-            updatePickerInput(session, "lineage_rds_object_select",
-              choices = dataset_choices,
-              selected = selected_dataset
-            )
-          }
-          if (!is.null(lineage_assays) && length(lineage_assays)) {
-            updatePickerInput(session, "denoise_assays_choice",
-              choices = lineage_assays,
-              selected = intersect(state$denoised_assays, lineage_assays)
-            )
-          }
+        state$qc_applied <- TRUE
+        if (!is.null(state$seurat$pb_rna) || !is.null(state$seurat$pb_atac)) {
+          single_cell_status("Pseudo-bulk data restored from snapshot.")
+        } else {
+          single_cell_status("Awaiting single-cell uploads.")
         }
-
-        if (!is.null(state$single_drug_values)) {
-          single_drug_choices <- extract_drug_choices(state$single_drug_values)
-          updatePickerInput(session, "single_drug_select", choices = single_drug_choices)
-        }
-
         output$lineage_upload_status <- renderText("Lineage data restored from QC snapshot.")
-        output$single_cell_upload_status <- renderText("Single-cell data restored from QC snapshot.")
-        output$single_cell_rna_rds_status <- renderText("scRNA-seq object loaded from snapshot.")
-        output$single_cell_atac_rds_status <- renderText("scATAC-seq object loaded from snapshot.")
-        output$qc_snapshot_status <- renderText("QC snapshot loaded successfully.")
-        if (!is.null(state$mapping$rna)) {
-          output$lineage_rna_mapping_status <- renderText("RNA mapping restored from snapshot.")
-        }
-        if (!is.null(state$mapping$atac)) {
-          output$single_cell_atac_mapping_status <- renderText("ATAC mapping restored from snapshot.")
-        }
-        if (!is.null(state$metadata$atac)) {
-          output$single_cell_atac_metadata_status <- renderText("ATAC metadata restored from snapshot.")
-        }
-
-        output$upload_summary <- renderText({
-          paste(
-            "Lineage data: Restored",
-            "\nAvailable assays:", if (length(lineage_assays)) paste(lineage_assays, collapse = ", ") else "None",
-            "\nDenoised assays:", if (length(state$denoised_assays)) paste(state$denoised_assays, collapse = ", ") else "None",
-            "\nSingle-cell RNA:", if (is.null(state$seurat$sc_rna)) "Not available" else "Restored",
-            "\nSingle-cell ATAC:", if (is.null(state$seurat$sc_atac)) "Not available" else "Restored",
-            "\nNote: Snapshot data loaded. QC has already been applied."
-          )
-        })
-
+        output$upload_summary <- renderText(compose_upload_summary(state))
         showNotification("QC snapshot loaded successfully!", type = "message", duration = 5)
-
       }, error = function(e) {
         output$qc_snapshot_status <- renderText(paste("Failed to load snapshot:", e$message))
         showNotification(paste("Failed to load QC snapshot:", e$message), type = "error", duration = 8)
@@ -1177,21 +1147,7 @@ server <- function(input, output, session) {
           duration = 5
         )
         
-        output$upload_summary <- renderText({
-          lineage_status <- if (is.null(state$dslt)) "Not loaded" else "Loaded"
-          single_cell_rna_status <- if (is.null(state$seurat$sc_rna_raw)) "Not uploaded" else "Uploaded"
-          single_cell_atac_status <- if (is.null(state$seurat$sc_atac_raw)) "Not uploaded" else "Uploaded"
-          mapping_status <- if (is.null(state$mapping$rna) && is.null(state$mapping$atac)) "Not provided" else "Provided"
-          
-          paste(
-            "Lineage data:", lineage_status,
-            "\nSingle-cell RNA:", single_cell_rna_status,
-            "\nSingle-cell ATAC:", single_cell_atac_status,
-            "\nMapping:", mapping_status,
-            "\nDenoised assays:", paste(state$denoised_assays, collapse = ", "),
-            "\nNote: Apply QC settings with RNA mapping to generate single-cell drug data."
-          )
-        })
+        output$upload_summary <- renderText(compose_upload_summary(state))
         
       }, error = function(e) {
         showNotification(paste("Denoising failed:", e$message), type = "error")
@@ -1224,16 +1180,18 @@ server <- function(input, output, session) {
       suffix <- input$barcode_suffix
       if (!nzchar(suffix)) suffix <- NULL
 
-      # RNA QC -------------------------------------------------------------
+      lineage_rna_mapped <- FALSE
+      lineage_atac_mapped <- FALSE
+      had_single_inputs <- !is.null(state$seurat$sc_rna_raw) || !is.null(state$seurat$sc_atac_raw)
+
       if (!is.null(state$seurat$sc_rna_raw)) {
-        seu <- state$seurat$sc_rna_raw
         incProgress(0.05, detail = "Filtering RNA cells by suffix...")
+        seu <- state$seurat$sc_rna_raw
         if (!is.null(suffix)) {
           seu <- tryCatch(filter_cells_by_suffix(seu, suffix = suffix), error = function(e) seu)
         }
-        incProgress(0.1, detail = "Plotting RNA QC metrics...")
 
-        # 生成QC图
+        incProgress(0.1, detail = "Generating RNA QC plots...")
         state$qc$rna_violin <- plot_rna_qc_violin(
           seu,
           min_features = input$rna_nfeature_min,
@@ -1242,7 +1200,7 @@ server <- function(input, output, session) {
         )
         state$qc$rna_scatter <- plot_rna_qc_scatter(seu)
 
-        incProgress(0.15, detail = "Filtering RNA cells...")
+        incProgress(0.15, detail = "Filtering RNA cells by QC thresholds...")
         seu <- filter_rna_qc(
           seu,
           min_features = input$rna_nfeature_min,
@@ -1252,60 +1210,28 @@ server <- function(input, output, session) {
           max_percent_mt = input$rna_percent_mt_max,
           verbose = FALSE
         )
-        incProgress(0.25, detail = "Normalizing Single Cell RNA data (SCTransform)...")
 
+        incProgress(0.2, detail = "Normalizing single-cell RNA data...")
         seu <- SCTransform(seu, verbose = FALSE)
-
-        incProgress(0.30, detail = "Running RNA PCA, UMAP, t-SNE, and clustering for single cells...")
-
-        single_dims <- seq(input$single_umap_pca_dims[1], input$single_umap_pca_dims[2])
-        tsne_dims <- seq(input$single_tsne_pca_dims[1], input$single_tsne_pca_dims[2])
-        npcs_needed <- 30
-
-        pca_res <- ensure_pca(seu, dslt = state$dslt, npcs = npcs_needed, assays = "RNA", level = "single cell")
-        seu <- pca_res$seu
-        state$dslt <- pca_res$dslt
+        seu <- RunPCA(seu, npcs = 30, verbose = FALSE)
         state$qc$rna_elbow <- ElbowPlot(seu)
-
-        kmeans_res <- ensure_kmeans_clusters(
-          seu,
-          k = 5,
-          res = 0.5,
-          dims = 1:30,
-          dslt = state$dslt,
-          assays = "RNA",
-          level = "single cell"
-        )
-        seu <- kmeans_res$seu
-        state$dslt <- kmeans_res$dslt
-
-        umap_res <- ensure_umap(seu, input$single_umap_pca_dims, dslt = state$dslt, assays = "RNA", level = "single cell")
-        seu <- umap_res$seu
-        state$dslt <- umap_res$dslt
-
-        tsne_res <- ensure_tsne(seu, input$single_tsne_pca_dims, dslt = state$dslt, assays = "RNA", level = "single cell")
-        seu <- tsne_res$seu
-        state$dslt <- tsne_res$dslt
-
         state$seurat$sc_rna <- seu
       }
 
-      # ATAC QC ------------------------------------------------------------
       if (!is.null(state$seurat$sc_atac_raw)) {
+        incProgress(0.25, detail = "Filtering ATAC cells by suffix...")
         seu_atac <- state$seurat$sc_atac_raw
-        incProgress(0.32, detail = "Filtering ATAC cells by suffix...")
         if (!is.null(suffix)) {
           seu_atac <- tryCatch(filter_cells_by_suffix(seu_atac, suffix = suffix), error = function(e) seu_atac)
         }
+
+        incProgress(0.3, detail = "Computing ATAC QC metrics...")
         seu_atac <- calculate_nucleosome_signal(seu_atac)
         if (!"TSS_fragments" %in% colnames(seu_atac@meta.data)) {
-        seu_atac <- calculate_tss_enrichment(seu_atac)
+          seu_atac <- calculate_tss_enrichment(seu_atac)
         }
         seu_atac <- calculate_atac_qc_metrics(seu_atac)
 
-        incProgress(0.35, detail = "Plotting Single Cell ATAC QC metrics...")
-
-        # 生成QC图
         state$qc$atac_density <- plot_tss_density_scatter(seu_atac)
         state$qc$atac_fragment <- plot_fragment_histogram(seu_atac)
         state$qc$atac_violin <- plot_atac_qc_violins(
@@ -1318,8 +1244,7 @@ server <- function(input, output, session) {
           blacklist_max = input$atac_blacklist_ratio_max
         )
 
-        incProgress(0.40, detail = "Filtering ATAC cells...")
-
+        incProgress(0.35, detail = "Filtering ATAC cells by QC thresholds...")
         seu_atac <- filter_atac_cells(
           seu_atac,
           ncount_min = input$atac_peak_fragments_min,
@@ -1327,55 +1252,18 @@ server <- function(input, output, session) {
           pct_reads_min = input$atac_pct_reads_peaks_min,
           blacklist_max = input$atac_blacklist_ratio_max,
           nucleosome_max = input$atac_nucleosome_signal_max,
-          tss_min = input$atac_tss_enrichment_min
+          tss_min = input$atac_tss_enrichment_min,
+          verbose = FALSE
         )
-
-        incProgress(0.50, detail = "Normalizing Single Cell ATAC data (TF-IDF)...")
-
-        seu_atac <- RunTFIDF(seu_atac)
-        seu_atac <- FindTopFeatures(seu_atac, min.cutoff = 'q0')
-        seu_atac <- RunSVD(seu_atac)
-        state$seurat$sc_atac <- seu_atac
-
-        output$qc_atac_depth_correlation <- renderPlot({
-          req(state$seurat$sc_atac)
-          seu <- state$seurat$sc_atac
-          DepthCor(seu)
-        })
-
-        incProgress(0.75, detail = "Running ATAC UMAP, t-SNE, and clustering for single cells...")
-
-        atac_dims <- seq(input$single_umap_pca_dims[1], input$single_umap_pca_dims[2])
-        atac_tsne_dims <- seq(input$single_tsne_pca_dims[1], input$single_tsne_pca_dims[2])
-        atac_npcs <- 30
-
-        kmeans_res <- ensure_kmeans_clusters(
-          seu_atac,
-          k = 5,
-          res = 0.5,
-          dims = 2:30,
-          dslt = state$dslt,
-          assays = "ATAC",
-          level = "single cell"
-        )
-        seu_atac <- kmeans_res$seu
-        state$dslt <- kmeans_res$dslt
-
-        atac_umap_res <- ensure_umap(seu_atac, input$single_umap_svd_dims, dslt = state$dslt, assays = "ATAC", level = "single cell")
-        seu_atac <- atac_umap_res$seu
-        state$dslt <- atac_umap_res$dslt
-
-        atac_tsne_res <- ensure_tsne(seu_atac, input$single_tsne_svd_dims, dslt = state$dslt, assays = "ATAC", level = "single cell")
-        seu_atac <- atac_tsne_res$seu
-        state$dslt <- atac_tsne_res$dslt
+        seu_atac <- RunTFIDF(seu_atac, verbose = FALSE)
+        seu_atac <- FindTopFeatures(seu_atac, min.cutoff = "q0", verbose = FALSE)
+        seu_atac <- RunSVD(seu_atac, verbose = FALSE)
         state$seurat$sc_atac <- seu_atac
       }
 
-      # Mapping to lineage level -----------------------------------------
-      lineage_rna_mapped <- FALSE
-      lineage_atac_mapped <- FALSE
+      incProgress(0.45, detail = "Mapping to lineage level...")
+
       if (!is.null(state$mapping$rna) && !is.null(state$seurat$sc_rna)) {
-        incProgress(0.80, detail = "Mapping RNA data to lineage level...")
         pb_rna <- lineage_map_seurat_rna(
           se = state$seurat$sc_rna,
           bc = state$mapping$rna,
@@ -1383,11 +1271,8 @@ server <- function(input, output, session) {
           assay = "RNA",
           key = "rna"
         )
-        lineage_dims <- seq(input$lineage_umap_pca_dims[1], input$lineage_umap_pca_dims[2])
-        lineage_tsne_dims <- seq(input$lineage_tsne_pca_dims[1], input$lineage_tsne_pca_dims[2])
-        lineage_npcs <- max(c(lineage_dims, lineage_tsne_dims))
-
-        pca_res <- ensure_pca(pb_rna, dslt = state$dslt, npcs = lineage_npcs, assays = "RNA", level = "lineage")
+        lineage_dims <- c(1, 30)
+        pca_res <- ensure_pca(pb_rna, dslt = state$dslt, npcs = 30, assays = "RNA", level = "lineage")
         pb_rna <- pca_res$seu
         state$dslt <- pca_res$dslt
 
@@ -1403,20 +1288,19 @@ server <- function(input, output, session) {
         pb_rna <- kmeans_res$seu
         state$dslt <- kmeans_res$dslt
 
-        umap_res <- ensure_umap(pb_rna, input$lineage_umap_pca_dims, dslt = state$dslt, assays = "RNA", level = "lineage")
+        umap_res <- ensure_umap(pb_rna, lineage_dims, dslt = state$dslt, assays = "RNA", level = "lineage")
         pb_rna <- umap_res$seu
         state$dslt <- umap_res$dslt
 
-        tsne_res <- ensure_tsne(pb_rna, input$lineage_tsne_pca_dims, dslt = state$dslt, assays = "RNA", level = "lineage")
+        tsne_res <- ensure_tsne(pb_rna, lineage_dims, dslt = state$dslt, assays = "RNA", level = "lineage")
         pb_rna <- tsne_res$seu
         state$dslt <- tsne_res$dslt
+
         state$seurat$pb_rna <- pb_rna
-        state$lineage_cell_counts <- state$dslt[["assays"]][["rna_map"]]
         lineage_rna_mapped <- TRUE
       }
 
       if (!is.null(state$mapping$atac) && !is.null(state$seurat$sc_atac)) {
-        # 使用lineage_map_seurat_atac函数映射ATAC数据
         pb_atac <- lineage_map_seurat_atac(
           se = state$seurat$sc_atac,
           bc = state$mapping$atac,
@@ -1424,12 +1308,8 @@ server <- function(input, output, session) {
           assay = "peaks",
           key = "atac"
         )
-
-        atac_dims <- seq(input$lineage_umap_pca_dims[1], input$lineage_umap_pca_dims[2])
-        atac_tsne_dims <- seq(input$lineage_tsne_pca_dims[1], input$lineage_tsne_pca_dims[2])
-        atac_npcs <- 30
-
-        pca_res <- ensure_pca(pb_atac, dslt = state$dslt, npcs = atac_npcs, assays = "ATAC", level = "lineage")
+        atac_dims <- c(1, 30)
+        pca_res <- ensure_pca(pb_atac, dslt = state$dslt, npcs = 30, assays = "ATAC", level = "lineage")
         pb_atac <- pca_res$seu
         state$dslt <- pca_res$dslt
 
@@ -1445,129 +1325,88 @@ server <- function(input, output, session) {
         pb_atac <- kmeans_res$seu
         state$dslt <- kmeans_res$dslt
 
-        # UMAP降维
-        umap_res <- ensure_umap(pb_atac, input$lineage_umap_svd_dims, dslt = state$dslt, assays = "ATAC", level = "lineage")
+        umap_res <- ensure_umap(pb_atac, atac_dims, dslt = state$dslt, assays = "ATAC", level = "lineage")
         pb_atac <- umap_res$seu
         state$dslt <- umap_res$dslt
 
-        # t-SNE降维
-        tsne_res <- ensure_tsne(pb_atac, input$lineage_tsne_svd_dims, dslt = state$dslt, assays = "ATAC", level = "lineage")
+        tsne_res <- ensure_tsne(pb_atac, atac_dims, dslt = state$dslt, assays = "ATAC", level = "lineage")
         pb_atac <- tsne_res$seu
         state$dslt <- tsne_res$dslt
 
         state$seurat$pb_atac <- pb_atac
-        showNotification("ATAC data successfully mapped to lineage level", type = "message")
         lineage_atac_mapped <- TRUE
       }
 
-      if (lineage_rna_mapped && lineage_atac_mapped) {
-        lineage_detail <- "Lineage mapping (RNA & ATAC) complete"
-      } else if (lineage_rna_mapped) {
-        lineage_detail <- "Lineage mapping (RNA) complete"
-      } else if (lineage_atac_mapped) {
-        lineage_detail <- "Lineage mapping (ATAC) complete"
-      }
-      incProgress(0.89, detail = lineage_detail)
-
-      # Store single cell drug values if mapping available ----------------
-      # 只有在成功映射后才生成并更新single_drug_values
-      incProgress(0.90, detail = "Mapping drug response to single cells...")
-      if (!is.null(state$mapping$rna)) {
-        mapping_success <- tryCatch({
-          state$dslt <- map_lineage_to_single_cell(state$dslt, state$mapping$rna, suffix = suffix)
-          TRUE
-        }, error = function(e) {
-          showNotification(paste("Failed to map lineage to single-cell:", e$message), type = "warning")
-          FALSE
-        })
-
-        if (mapping_success) {
-          previous_single_choices <- names(state$single_drug_values)
-          if (is.null(previous_single_choices)) previous_single_choices <- character()
-          state$single_drug_values <- state$dslt[["assays"]][["single_cell"]]
-          # 更新single-cell drug选择器
-          drug_choices_single <- extract_drug_choices(state$single_drug_values)
-          updatePickerInput(session, "single_drug_select", choices = drug_choices_single)
-          single_dataset_choices <- names(state$single_drug_values)
-          if (length(single_dataset_choices)) {
-            new_tables <- setdiff(single_dataset_choices, previous_single_choices)
-            default_selection <- if (length(new_tables)) {
-              new_tables[length(new_tables)]
-            } else {
-              isolate(input$single_rds_object_select)
-            }
-            if (!length(default_selection) || !(default_selection %in% single_dataset_choices)) {
-              default_selection <- single_dataset_choices[length(single_dataset_choices)]
-            }
-            updatePickerInput(session, "single_rds_object_select",
-              choices = single_dataset_choices,
-              selected = default_selection
-            )
-          }
-          showNotification("Single-cell drug response data successfully generated from lineage mapping.", type = "message")
-          drug_mapping_detail <- "Single-cell drug mapping complete"
-        } else {
-          drug_mapping_detail <- "Single-cell drug mapping failed"
-        }
-      }
-      incProgress(1, detail = drug_mapping_detail)
-
+      state$lineage_drug_values <- state$dslt[["assays"]][["lineage"]]
       state$qc_applied <- TRUE
+
+      removed_inputs <- c()
+      if (lineage_rna_mapped) {
+        state$seurat$sc_rna <- NULL
+        state$seurat$sc_rna_raw <- NULL
+        removed_inputs <- c(removed_inputs, "RNA")
+      }
+      if (lineage_atac_mapped) {
+        state$seurat$sc_atac <- NULL
+        state$seurat$sc_atac_raw <- NULL
+        state$metadata$atac <- NULL
+        removed_inputs <- c(removed_inputs, "ATAC")
+      }
+
+      if (length(removed_inputs)) {
+        single_cell_status(glue::glue(
+          "Pseudo-bulk data generated; single-cell {paste(removed_inputs, collapse = " and ")} objects removed from memory."
+        ))
+      } else if (had_single_inputs) {
+        single_cell_status("Single-cell inputs processed without mapping; provide barcode mapping to create pseudo-bulk data.")
+      }
 
       if (length(state$denoised_assays)) {
         for (assay in state$denoised_assays) {
-          if (!nzchar(assay)) {
-            next
-          }
-          for (level in c("lineage", "single_cell")) {
-            if (is.null(get_dslt_assay_safe(state$dslt, level, assay))) {
-              next
-            }
-            tryCatch({
-              ensure_knn_embeddings(state, assay, level = level)
-            }, error = function(e) {
-              showNotification(paste("Failed to compute KNN for", assay, "(", level, "):", e$message), type = "error")
-            })
-            tryCatch({
-              ensure_archetype_metadata(state, assay, level = level)
-            }, error = function(e) {
-              showNotification(paste("Failed to compute archetype analysis for", assay, "(", level, "):", e$message), type = "error")
-            })
-          }
+          if (!nzchar(assay)) next
+          tryCatch({
+            ensure_knn_embeddings(state, assay, level = "lineage")
+            ensure_archetype_metadata(state, assay, level = "lineage")
+          }, error = function(e) {
+            showNotification(paste("Failed to refresh analysis for", assay, ":", e$message), type = "warning")
+          })
         }
       }
 
-      # 1. 尝试保存对象
+      updatePickerInput(session, "lineage_drug_select", choices = extract_drug_choices(state$lineage_drug_values))
+      updatePickerInput(session, "lineage_rds_object_select",
+        choices = names(state$lineage_drug_values),
+        selected = if (length(state$lineage_drug_values)) names(state$lineage_drug_values)[1] else character(0)
+      )
+
+      output$qc_settings_status <- renderText({
+        status <- c()
+        if (lineage_rna_mapped) status <- c(status, "RNA pseudo-bulk ready")
+        if (lineage_atac_mapped) status <- c(status, "ATAC pseudo-bulk ready")
+        if (!length(status)) {
+          "Lineage QC applied without single-cell mapping."
+        } else {
+          paste("QC complete:", paste(status, collapse = ", "))
+        }
+      })
+
+      output$upload_summary <- renderText(compose_upload_summary(state))
+
       tryCatch({
-        # 2. 将所有对象打包到一个列表中
         snapshot_data <- list(
-          sc_rna = state$seurat$sc_rna,
-          sc_atac = state$seurat$sc_atac,
+          dslt = state$dslt,
+          denoised_assays = state$denoised_assays,
+          drug_matrix = state$drug_matrix,
+          lineage_drug_values = state$lineage_drug_values,
+          qc = state$qc,
           pb_rna = state$seurat$pb_rna,
-          dslt = state$dslt
+          pb_atac = state$seurat$pb_atac
         )
-
-        # 3. 创建一个带时间戳的唯一文件名
-        timestamp <- format(Sys.time(), "%Y-%m-%d_%H%M%S")
-        filename <- paste0("qc_snapshot_", timestamp, ".rds")
-
-        # 4. 保存到文件
+        filename <- paste0("qc_snapshot_", format(Sys.time(), "%Y-%m-%d_%H%M%S"), ".rds")
         saveRDS(snapshot_data, file = filename)
-
-        # 5. (可选) 通知用户保存成功
-        # (如果您使用的是 server.R，showNotification 已经可用)
-        showNotification(
-          paste("QC snapshot saved to server at:", filename),
-          type = "message",
-          duration = 5
-        )
+        showNotification(paste("QC snapshot saved to server at:", filename), type = "message", duration = 5)
       }, error = function(e) {
-        # 6. (可选) 保存失败时发出警告
-        showNotification(
-          paste("Failed to save QC snapshot:", e$message),
-          type = "error",
-          duration = 10
-        )
+        showNotification(paste("Failed to save QC snapshot:", e$message), type = "error", duration = 10)
       })
     })
   })
@@ -1575,32 +1414,32 @@ server <- function(input, output, session) {
   # QC plots --------------------------------------------------------------
   # -----------------------------------------------------------------------
   output$qc_rna_qc <- renderPlot({
-    req(state$qc$rna_violin)
+    if (is.null(state$qc$rna_violin)) return(NULL)
     state$qc$rna_violin
   })
 
   output$qc_rna_pca_elbow <- renderPlot({
-    req(state$qc$rna_elbow)
+    if (is.null(state$qc$rna_elbow)) return(NULL)
     state$qc$rna_elbow
   })
 
   output$qc_rna_fea <- renderPlot({
-    req(state$qc$rna_scatter)
+    if (is.null(state$qc$rna_scatter)) return(NULL)
     state$qc$rna_scatter
   })
 
   output$qc_atac_Density <- renderPlot({
-    req(state$qc$atac_density)
+    if (is.null(state$qc$atac_density)) return(NULL)
     state$qc$atac_density
   })
 
   output$qc_atac_Fragment <- renderPlot({
-    req(state$qc$atac_fragment)
+    if (is.null(state$qc$atac_fragment)) return(NULL)
     state$qc$atac_fragment
   })
 
   output$qc_atac_QC <- renderPlot({
-    req(state$qc$atac_violin)
+    if (is.null(state$qc$atac_violin)) return(NULL)
     state$qc$atac_violin
   })
 
@@ -1608,139 +1447,13 @@ server <- function(input, output, session) {
   # Helper to obtain plotting reduction ----------------------------------
   # -----------------------------------------------------------------------
 
-  single_plot_settings <- eventReactive(
-    input$single_refresh_plots,
-    {
-      list(
-        reduction = input$single_red_method,
-        clustering = input$single_clustering_method,
-        kmeans_k = input$single_kmeans_input,
-        umap_pca_dims = input$single_umap_pca_dims,
-        tsne_pca_dims = input$single_tsne_pca_dims,
-        umap_svd_dims = input$single_umap_svd_dims,
-        tsne_svd_dims = input$single_tsne_svd_dims,
-        dataset = input$single_rds_object_select,
-        selected_drugs = input$single_drug_select,
-        bubble_mode = input$single_bubble_mode,
-        track_mode = input$single_track_mode,
-        gene_input = input$single_gene_input,
-        region_input = input$single_atac_region_input
-      )
-    },
-    ignoreNULL = FALSE
-  )
-
-  single_plot_data <- reactive({
-    req(state$qc_applied)
-    seu <- state$seurat$sc_rna
-    req(seu)
-
-    settings <- single_plot_settings()
-    method <- settings$reduction
-    clustering <- settings$clustering
-    reduction <- "pca"
-    cluster_col <- "seurat_clusters"
-    dims <- seq(1, 30)
-
-    dslt_level <- "single cell"
-
-    # 先根据降维方法确保降维结果（PCA/UMAP/t-SNE）
-    if (method == "umap") {
-      res <- ensure_umap(seu, settings$umap_pca_dims, dslt = state$dslt, assays = "RNA", level = dslt_level)
-      seu <- res$seu
-      state$dslt <- res$dslt
-      reduction <- res$reduction
-    } else if (method == "tsne") {
-      res <- ensure_tsne(seu, settings$tsne_pca_dims, dslt = state$dslt, assays = "RNA", level = dslt_level)
-      seu <- res$seu
-      state$dslt <- res$dslt
-      reduction <- res$reduction
-    } else {
-      # 默认或 "pca"
-      pca_res <- ensure_pca(seu, dslt = state$dslt, assays = "RNA", level = dslt_level)
-      seu <- pca_res$seu
-      state$dslt <- pca_res$dslt
-      reduction <- "pca"
-    }
-
-    # 再根据聚类方法确保聚类列
-    if (clustering == "kmeans") {
-      res <- ensure_kmeans_clusters(seu, settings$kmeans_k, dims = dims, dslt = state$dslt, assays = "RNA", level = dslt_level)
-      seu <- res$seu
-      state$dslt <- res$dslt
-      cluster_col <- res$column
-    } else {
-      # 默认使用 Louvain（seurat_clusters）
-      cluster_res <- ensure_clusters(seu, dslt = state$dslt, assays = "RNA", level = dslt_level, dims = dims)
-      seu <- cluster_res$seu
-      state$dslt <- cluster_res$dslt
-      cluster_col <- "seurat_clusters"
-    }
-
-    state$seurat$sc_rna <- seu
-    list(seu = seu, reduction = reduction, cluster_col = cluster_col)
-  })
-
-  single_plot_data_atac <- reactive({
-    req(state$qc_applied)
-    seu <- state$seurat$sc_atac
-    req(seu)
-
-    settings <- single_plot_settings()
-    method <- settings$reduction
-    clustering <- settings$clustering
-    reduction <- "lsi"
-    cluster_col <- "seurat_clusters"
-    dims <- seq(2, 30)
-
-    dslt_level <- "single cell"
-
-    # 先根据降维方法确保降维结果（PCA/UMAP/t-SNE）
-    if (method == "umap") {
-      res <- ensure_umap(seu, settings$umap_svd_dims, dslt = state$dslt, assays = "ATAC", level = dslt_level)
-      seu <- res$seu
-      state$dslt <- res$dslt
-      reduction <- res$reduction
-    } else if (method == "tsne") {
-      res <- ensure_tsne(seu, settings$umap_svd_dims, dslt = state$dslt, assays = "ATAC", level = dslt_level)
-      seu <- res$seu
-      state$dslt <- res$dslt
-      reduction <- res$reduction
-    } else {
-      pca_res <- ensure_pca(seu, dslt = state$dslt, assays = "ATAC", level = dslt_level)
-      seu <- pca_res$seu
-      state$dslt <- pca_res$dslt
-      reduction <- "lsi"
-    }
-
-    # 再根据聚类方法确保聚类列
-    if (clustering == "kmeans") {
-      res <- ensure_kmeans_clusters(seu, settings$kmeans_k, dims = dims, dslt = state$dslt, assays = "ATAC", level = dslt_level)
-      seu <- res$seu
-      state$dslt <- res$dslt
-      cluster_col <- res$column
-    } else {
-      # 默认使用 Louvain（seurat_clusters）
-      cluster_res <- ensure_clusters(seu, dslt = state$dslt, assays = "ATAC", level = dslt_level, dims = dims)
-      seu <- cluster_res$seu
-      state$dslt <- cluster_res$dslt
-      cluster_col <- "seurat_clusters"
-    }
-
-    state$seurat$sc_atac <- seu
-    list(seu = seu, reduction = reduction, cluster_col = cluster_col)
-  })
-
-  # -----------------------------------------------------------------------
-  # Lineage plots --------------------------------------------------------
-  # -----------------------------------------------------------------------
   lineage_plot_settings <- eventReactive(
     input$lineage_refresh_plots,
     {
       list(
         reduction = input$lineage_red_method,
         clustering = input$lineage_clustering_method,
-        kmeans_k = input$lineage_kmeans_input,
+        kmeans_k = suppressWarnings(as.integer(input$lineage_kmeans_input)),
         umap_pca_dims = input$lineage_umap_pca_dims,
         umap_svd_dims = input$lineage_umap_svd_dims,
         tsne_pca_dims = input$lineage_tsne_pca_dims,
@@ -1760,54 +1473,93 @@ server <- function(input, output, session) {
     req(state$qc_applied)
     settings <- lineage_plot_settings()
     seu <- state$seurat$pb_rna
+    req(seu)
+
     reduction <- settings$reduction
+    if (is.null(reduction) || !nzchar(reduction)) reduction <- "umap"
     cluster_col <- settings$clustering
-    if (cluster_col == "kmeans") {
-      res <- ensure_kmeans_clusters(seu, settings$kmeans_k, dims = seq(1, 30), dslt = state$dslt, assays = "RNA", level = "lineage")
+    if (is.null(cluster_col) || !nzchar(cluster_col)) cluster_col <- "louvain"
+
+    if (identical(reduction, "umap")) {
+      dims <- settings$umap_pca_dims
+      if (is.null(dims)) dims <- c(1, 30)
+      res <- ensure_umap(seu, dims, dslt = state$dslt, assays = "RNA", level = "lineage")
+      seu <- res$seu
+      state$dslt <- res$dslt
+      reduction <- res$reduction
+    } else if (identical(reduction, "tsne")) {
+      dims <- settings$tsne_pca_dims
+      if (is.null(dims)) dims <- c(1, 30)
+      res <- ensure_tsne(seu, dims, dslt = state$dslt, assays = "RNA", level = "lineage")
+      seu <- res$seu
+      state$dslt <- res$dslt
+      reduction <- res$reduction
+    } else {
+      res <- ensure_pca(seu, dslt = state$dslt, assays = "RNA", level = "lineage")
+      seu <- res$seu
+      state$dslt <- res$dslt
+      reduction <- res$reduction
+    }
+
+    if (identical(cluster_col, "kmeans")) {
+      k <- settings$kmeans_k
+      if (is.na(k) || k < 1) k <- 5L
+      res <- ensure_kmeans_clusters(seu, k = k, dims = seq(1, 30), dslt = state$dslt, assays = "RNA", level = "lineage")
       seu <- res$seu
       state$dslt <- res$dslt
       cluster_col <- res$column
-    } else if (cluster_col == "louvain") {
-      cluster_res <- ensure_clusters(seu, dslt = state$dslt, assays = "RNA", level = "lineage", dims = seq(1, 30))
-      seu <- cluster_res$seu
-      state$dslt <- cluster_res$dslt
+    } else {
+      res <- ensure_clusters(seu, dslt = state$dslt, assays = "RNA", level = "lineage", dims = seq(1, 30))
+      seu <- res$seu
+      state$dslt <- res$dslt
       cluster_col <- "seurat_clusters"
     }
-    DimPlot(seu, cols = c("#ebce2b", "#702c8c", "#db6917", "#96cde6", "#ba1c30", "#c0bd7f", "#7f7e80", "#5fa641", "#d485b2", "#4277b6", "#df8461", "#463397", "#e1a11a", "#91218c", "#e8e948", "#7e1510", "#92ae31", "#6f340d", "#d32b1e", "#2b3514"),
-            reduction = reduction, group.by = cluster_col) +
+
+    DimPlot(
+      seu,
+      cols = cluster_palette,
+      reduction = reduction,
+      group.by = cluster_col
+    ) +
       theme_minimal()
   })
 
   lineage_knn_plot_obj <- reactive({
     settings <- lineage_plot_settings()
     assay_name <- settings$dataset
-    req(assay_name)
+    req(state$qc_applied, assay_name)
     res <- ensure_knn_embeddings(state, assay_name, level = "lineage")
     validate(need(!is.null(res$coords) && !is.null(res$clusters), "Run KNN analysis on the selected assay."))
-    colored_clusters <- ggscatter_colored(
-      res$coords,
-      as.factor(res$clusters),
-      ggObj = ggplot(),
-      dimnamesXYZ = NULL,
-      size = 0.5,
-      gg_theme = theme_umap_legend,
-      colors = c("#ebce2b", "#702c8c", "#db6917", "#96cde6", "#ba1c30", "#c0bd7f", "#7f7e80", "#5fa641", "#d485b2", "#4277b6", "#df8461", "#463397", "#e1a11a", "#91218c", "#e8e948", "#7e1510", "#92ae31", "#6f340d", "#d32b1e", "#2b3514")
-    ) +
-    guides(color = guide_legend(override.aes = list(size = 3)))
-    coord_fixed()
+    coords <- as.matrix(res$coords)
+    validate(need(ncol(coords) >= 2, "Embedding requires at least two dimensions."))
+    df <- as.data.frame(coords)
+    names(df)[1:2] <- c("Dim1", "Dim2")
+    df$cluster <- as.factor(res$clusters)
+    ggplot(df, aes(x = Dim1, y = Dim2, color = cluster)) +
+      geom_point(size = 1) +
+      scale_color_manual(values = cluster_palette) +
+      theme_umap_legend +
+      coord_fixed()
   })
 
   output$lineage_rna_cluster_plot <- renderPlot({ req(lineage_cluster_plot_obj()); lineage_cluster_plot_obj() })
   output$lineage_knn_plot <- renderPlot({ req(lineage_knn_plot_obj()); lineage_knn_plot_obj() })
-  
-  output$lineage_atac_cluster_plot <- renderPlot({
+
+  lineage_atac_cluster_plot_obj <- reactive({
     settings <- lineage_plot_settings()
-    req(state$seurat$pb_atac)   # 只有 pb_atac 存在时才渲染
+    req(state$seurat$pb_atac)
     seu <- state$seurat$pb_atac
-    umap_res <- ensure_umap(seu, settings$umap_pca_dims, dslt = NULL, assays = "ATAC", level = "lineage")
-    seu <- umap_res$seu
-    DimPlot(seu, reduction = "umap", group.by = "seurat_clusters", pt.size = 1) + theme_minimal()
+
+    dims <- settings$umap_svd_dims
+    if (is.null(dims)) dims <- c(2, 30)
+    res <- ensure_umap(seu, dims, dslt = state$dslt, assays = "ATAC", level = "lineage")
+    seu <- res$seu
+    state$dslt <- res$dslt
+
+    DimPlot(seu, reduction = res$reduction, group.by = "seurat_clusters", pt.size = 1) + theme_minimal()
   })
+
+  output$lineage_atac_cluster_plot <- renderPlot({ req(lineage_atac_cluster_plot_obj()); lineage_atac_cluster_plot_obj() })
 
   lineage_drug_response_plot_obj <- reactive({
     settings <- lineage_plot_settings()
@@ -1833,7 +1585,7 @@ server <- function(input, output, session) {
       column_name = selected_drugs,
       ggObj = ggplot() + coord_fixed(),
       size_mult = 0.2,
-      colors = rev(c('#67001f','#b2182b',"#f4a582",'#fddbc7',"#ffffff",'#d1e5f0','#92c5de','#2166ac','#053061')),
+      colors = drug_palette,
       gg_theme = theme_umap,
       symmQuant = 0.95,
       legend.position = "right"
@@ -1924,13 +1676,13 @@ server <- function(input, output, session) {
 
   output$lineage_bubble_plot <- renderPlot({ req(lineage_bubble_plot_obj()); lineage_bubble_plot_obj() })
 
-  output$lineage_violin_plot <- renderPlot({
+  lineage_violin_plot_obj <- reactive({
     req(state$seurat$pb_rna)
     settings <- lineage_plot_settings()
     track_mode <- settings$track_mode
-    if (is.null(track_mode)) track_mode <- "gene"
+    if (is.null(track_mode) || !nzchar(track_mode)) track_mode <- "gene"
     features <- if (identical(track_mode, "gene")) settings$gene_input else settings$region_input
-    if (!nzchar(features)) return(NULL)
+    if (is.null(features) || !nzchar(features)) return(NULL)
     feat_vec <- str_split(features, "[,;\\s]+", simplify = TRUE)
     feat_vec <- feat_vec[feat_vec != ""]
     res <- plot_multi_violin_and_feature(
@@ -1942,265 +1694,28 @@ server <- function(input, output, session) {
     combine_feature_plots(res)
   })
 
-  # output$lineage_coverage_plot <- renderPlot({
-  #   req(state$seurat$pb_atac)
-  #   features <- if (input$lineage_track_mode == "region") input$lineage_atac_region_input else input$lineage_gene_input
-  #   if (!nzchar(features)) return(NULL)
-  #   feat_vec <- str_split(features, "[,;\\s]+", simplify = TRUE)
-  #   feat_vec <- feat_vec[feat_vec != ""]
-  #   res <- plot_multi_violin_and_feature(
-  #     seu = state$seurat$pb_atac,
-  #     features = feat_vec,
-  #     assay = "ATAC",
-  #     reduction = "umap"
-  #   )
-  #   combine_feature_plots(res)
-  # })
-
-  # -----------------------------------------------------------------------
-  # Single-cell plots ----------------------------------------------------
-  # -----------------------------------------------------------------------
-  single_cluster_plot_obj <- reactive({
-    pd <- single_plot_data()
-    seu <- pd$seu
-    reduction <- pd$reduction
-    cluster_col <- pd$cluster_col
-
-    DimPlot(seu, cols = c("#ebce2b", "#702c8c", "#db6917", "#96cde6", "#ba1c30", "#c0bd7f", "#7f7e80", "#5fa641", "#d485b2", "#4277b6", "#df8461", "#463397", "#e1a11a", "#91218c", "#e8e948", "#7e1510", "#92ae31", "#6f340d", "#d32b1e", "#2b3514"),
-            reduction = reduction, group.by = cluster_col) +
-      theme_minimal()
+  output$lineage_violin_plot <- renderPlot({
+    plot_obj <- lineage_violin_plot_obj()
+    if (is.null(plot_obj)) return(NULL)
+    plot_obj
   })
-
-  single_knn_plot_obj <- reactive({
-    settings <- single_plot_settings()
-    assay_name <- settings$dataset
-    req(assay_name)
-    res <- ensure_knn_embeddings(state, assay_name, level = "single_cell")
-    validate(need(!is.null(res$coords) && !is.null(res$clusters), "Run KNN analysis on the selected assay."))
-    colored_clusters <- ggscatter_colored(
-      res$coords,
-      as.factor(res$clusters),
-      ggObj = ggplot(),
-      dimnamesXYZ = NULL,
-      size = 0.5,
-      gg_theme = theme_umap_legend,
-      colors = c("#ebce2b", "#702c8c", "#db6917", "#96cde6", "#ba1c30", "#c0bd7f", "#7f7e80", "#5fa641", "#d485b2", "#4277b6", "#df8461", "#463397", "#e1a11a", "#91218c", "#e8e948", "#7e1510", "#92ae31", "#6f340d", "#d32b1e", "#2b3514")
-    ) +
-    guides(color = guide_legend(override.aes = list(size = 3)))
-    coord_fixed()
-  })
-
-  output$single_rna_cluster_plot <- renderPlot({ req(single_cluster_plot_obj()); single_cluster_plot_obj() })
-  output$single_knn_plot <- renderPlot({ req(single_knn_plot_obj()); single_knn_plot_obj() })
-
-  output$single_atac_cluster_plot <- reactive({
-    pd <- single_plot_data_atac()
-    seu <- pd$seu
-    reduction <- pd$reduction
-    cluster_col <- pd$cluster_col
-
-    DimPlot(seu, cols = c("#ebce2b", "#702c8c", "#db6917", "#96cde6", "#ba1c30", "#c0bd7f", "#7f7e80", "#5fa641", "#d485b2", "#4277b6", "#df8461", "#463397", "#e1a11a", "#91218c", "#e8e948", "#7e1510", "#92ae31", "#6f340d", "#d32b1e", "#2b3514"),
-            reduction = reduction, group.by = cluster_col) +
-      theme_minimal()
-  })
-
-  single_drug_response_plot_obj <- reactive({
-    settings <- single_plot_settings()
-    req(settings$dataset, state$single_drug_values)
-    assay_name <- settings$dataset
-    coords <- NULL
-    mat <- NULL
-    if (!is.null(state$dslt)) {
-      res <- ensure_knn_embeddings(state, assay_name, level = "single_cell")
-      coords <- res$coords
-      mat <- get_dslt_assay_safe(state$dslt, "single_cell", assay_name)
-      if (is.null(mat)) {
-        mat <- state$single_drug_values[[assay_name]]
-      }
-    }
-    if (is.null(coords)) {
-      pd <- single_plot_data()
-      coords <- Embeddings(pd$seu, pd$reduction)
-    }
-    if (is.null(mat)) {
-      mat <- state$single_drug_values[[assay_name]]
-    }
-    req(!is.null(coords), !is.null(mat))
-    mat <- as.matrix(mat)
-    mat <- normalize_matrix(mat)
-    selected_drugs <- intersect(colnames(mat), settings$selected_drugs)
-    validate(need(length(selected_drugs) > 0, "Select at least one drug."))
-    mat <- mat[, selected_drugs, drop = FALSE]
-    coords <- as.matrix(coords)
-    if (!is.null(rownames(coords)) && !is.null(rownames(mat))) {
-      common <- intersect(rownames(coords), rownames(mat))
-      validate(need(length(common) > 0, "No overlapping cells between embeddings and drug data."))
-      coords <- coords[common, , drop = FALSE]
-      mat <- mat[common, , drop = FALSE]
-    } else if (is.null(rownames(coords)) && !is.null(rownames(mat))) {
-      rownames(coords) <- rownames(mat)
-    } else if (!is.null(rownames(coords)) && is.null(rownames(mat))) {
-      rownames(mat) <- rownames(coords)
-    }
-    plot_list <- ggscatter_single(
-      coords = coords,
-      values = mat,
-      column_name = selected_drugs,
-      ggObj = ggplot() + coord_fixed(),
-      size_mult = 0.2,
-      colors = rev(c('#67001f','#b2182b',"#f4a582",'#fddbc7',"#ffffff",'#d1e5f0','#92c5de','#2166ac','#053061')),
-      gg_theme = theme_umap,
-      symmQuant = 0.95,
-      legend.position = "right"
-    )
-    plot_list
-  })
-
-  output$single_drug_response_plot <- renderPlot({ req(single_drug_response_plot_obj()); single_drug_response_plot_obj() })
-
-  single_bubble_plot_obj <- reactive({
-    settings <- single_plot_settings()
-    req(state$dslt, settings$dataset, settings$bubble_mode)
-    assay_name <- settings$dataset
-    if (!nzchar(assay_name)) return(NULL)
-    if (settings$bubble_mode == "cluster") {
-      res <- ensure_knn_embeddings(state, assay_name, level = "single_cell")
-      mat <- get_dslt_assay_safe(state$dslt, "single_cell", assay_name)
-      if (is.null(res$clusters) || is.null(mat)) return(NULL)
-      clusters <- res$clusters
-      if (is.matrix(clusters) || is.data.frame(clusters)) {
-        cluster_df <- as.data.frame(clusters)
-        if ("louvain_clusters" %in% colnames(cluster_df)) {
-          clusters <- cluster_df[["louvain_clusters"]]
-        } else {
-          clusters <- cluster_df[[1]]
-        }
-        if (!is.null(rownames(cluster_df)) && is.null(names(clusters))) {
-          names(clusters) <- rownames(cluster_df)
-        }
-      }
-      cluster_vals <- as.factor(clusters)
-      mat_df <- as.data.frame(as.matrix(mat))
-      if (!is.null(names(cluster_vals)) && !is.null(rownames(mat_df))) {
-        common <- intersect(names(cluster_vals), rownames(mat_df))
-        validate(need(length(common) > 0, "No overlapping cells between clusters and drug data."))
-        cluster_vals <- cluster_vals[common]
-        mat_df <- mat_df[common, , drop = FALSE]
-      } else if (is.null(names(cluster_vals)) && !is.null(rownames(mat_df))) {
-        names(cluster_vals) <- rownames(mat_df)
-      }
-      summarized_clusters <- summarize_columns(mat_df, cluster_vals, order_rows = TRUE)
-      summarized_mat <- as.matrix(summarized_clusters)
-      ggshape_heatmap(
-        summarized_mat,
-        abs(summarized_mat),
-        size_range = c(1, 7),
-        theme_choice = ggplot2::theme_minimal() + theme(plot.title = element_text(size = 16, hjust = 0, vjust = 1)),
-        shape_values = 21,
-        value_label = "Sensitivity",
-        size_label = "Effect size",
-        row_label = "Cluster",
-        column_label = "Treatment",
-        cluster_rows = TRUE,
-        colorscheme = rev(RdBl_mod3),
-        symmQuant = 0.95,
-        grid.pars = list(
-          grid.size = 1,
-          axis.text.x = element_text(size = 8, angle = 0, hjust = -1),
-          grid.color = "#f4f4f4",
-          grid.linetype = "solid"
-        ),
-        cluster_cols = TRUE,
-        text.angle.x = 90
-      ) + coord_fixed()
-    } else {
-      arch <- ensure_archetype_metadata(state, assay_name, level = "single_cell")
-      validate(need(!is.null(arch), "Archetype metadata not available."))
-      arch_mat <- as.matrix(arch)
-      values_mat <- t(tanh(arch_mat / 3))
-      size_mat <- t(abs(tanh(arch_mat / 3)))
-      ggshape_heatmap(
-        values_mat,
-        data_sizes = size_mat,
-        theme_choice = ggplot2::theme_minimal() + theme(plot.title = element_text(size = 18, hjust = 0, vjust = 1)),
-        shape_values = 21,
-        size_range = c(0.5, 4),
-        value_label = "Sensitivity",
-        size_label = "Effect size",
-        row_label = "Archetype",
-        column_label = "Treatment",
-        cluster_rows = TRUE,
-        colorscheme = rev(RdBl_mod3),
-        symmQuant = 0.95,
-        grid.pars = list(
-          grid.size = 0,
-          grid.color = "#f4f4f4",
-          grid.linetype = "solid"
-        ),
-        cluster_cols = TRUE,
-        text.angle.x = 90
-      ) + coord_fixed()
-    }
-  })
-
-  output$single_bubble_plot <- renderPlot({ req(single_bubble_plot_obj()); single_bubble_plot_obj() })
-
-  output$single_violin_plot <- renderPlot({
-    req(state$seurat$sc_rna)
-    settings <- single_plot_settings()
-    track_mode <- settings$track_mode
-    if (is.null(track_mode)) track_mode <- "gene"
-    features <- if (identical(track_mode, "gene")) settings$gene_input else settings$region_input
-    if (!nzchar(features)) return(NULL)
-    feat_vec <- str_split(features, "[,;\\s]+", simplify = TRUE)
-    feat_vec <- feat_vec[feat_vec != ""]
-    pd <- single_plot_data()
-    res <- plot_multi_violin_and_feature(
-      seu = pd$seu,
-      features = feat_vec,
-      assay = "SCT",
-      reduction = pd$reduction
-    )
-    combine_feature_plots(res)
-  })
-
-  # output$single_coverage_plot <- renderPlot({
-  #   req(state$seurat$sc_atac)
-  #   features <- if (input$single_track_mode == "region") input$single_atac_region_input else input$single_gene_input
-  #   if (!nzchar(features)) return(NULL)
-  #   feat_vec <- str_split(features, "[,;\\s]+", simplify = TRUE)
-  #   feat_vec <- feat_vec[feat_vec != ""]
-  #   pd <- single_plot_data()
-  #   res <- plot_multi_violin_and_feature(
-  #     seu = state$seurat$sc_atac,
-  #     features = feat_vec,
-  #     assay = "ATAC",
-  #     reduction = "umap"
-  #   )
-  #   combine_feature_plots(res)
-  # })
-
   # -----------------------------------------------------------------------
   # Export handlers -------------------------------------------------------
   # -----------------------------------------------------------------------
-  output$lineage_data_available <- reactive({ !is.null(state$seurat$pb_rna) })
-  output$single_cell_data_available <- reactive({ !is.null(state$seurat$sc_rna) })
+  output$lineage_data_available <- reactive({ !is.null(state$dslt) })
   outputOptions(output, "lineage_data_available", suspendWhenHidden = FALSE)
-  outputOptions(output, "single_cell_data_available", suspendWhenHidden = FALSE)
 
   output$download_lineage_data <- downloadHandler(
     filename = function() paste0("lineage_data_", Sys.Date(), ".rds"),
     content = function(file) {
-      saveRDS(list(dslt = state$dslt, seurat = state$seurat$pb_rna), file)
+      saveRDS(list(
+        dslt = state$dslt,
+        denoised_assays = state$denoised_assays,
+        drug_matrix = state$drug_matrix,
+        pb_rna = state$seurat$pb_rna,
+        pb_atac = state$seurat$pb_atac
+      ), file)
       update_export_history(state, "Exported lineage data")
-    }
-  )
-
-  output$download_single_cell_data <- downloadHandler(
-    filename = function() paste0("single_cell_data_", Sys.Date(), ".rds"),
-    content = function(file) {
-      saveRDS(list(seurat = state$seurat$sc_rna, atac = state$seurat$sc_atac), file)
-      update_export_history(state, "Exported single-cell data")
     }
   )
 
@@ -2230,9 +1745,16 @@ server <- function(input, output, session) {
   output$download_cluster_results <- downloadHandler(
     filename = function() paste0("cluster_results_", Sys.Date(), ".csv"),
     content = function(file) {
-      req(state$seurat$sc_rna)
-      df <- state$seurat$sc_rna@meta.data
-      df$barcode <- rownames(df)
+      settings <- lineage_plot_settings()
+      assay_name <- settings$dataset
+      req(assay_name)
+      res <- ensure_knn_embeddings(state, assay_name, level = "lineage")
+      clusters <- res$clusters
+      df <- data.frame(
+        barcode = if (!is.null(names(clusters))) names(clusters) else seq_along(clusters),
+        cluster = clusters,
+        stringsAsFactors = FALSE
+      )
       readr::write_csv(df, file)
       update_export_history(state, "Exported clustering results")
     }
@@ -2259,32 +1781,22 @@ server <- function(input, output, session) {
     content = function(file) {
       device <- switch(input$export_lineage_format, png = png, pdf = pdf, jpeg = jpeg)
       device(file, width = 10, height = 7)
-     
+
+      safe_eval <- function(expr) {
+        tryCatch(expr, error = function(e) NULL)
+      }
+
       plots <- list(
-        isolate(lineage_cluster_plot_obj()),
-        isolate(lineage_knn_plot_obj()),
-        isolate(lineage_drug_response_plot_obj()),
-        isolate(lineage_bubble_plot_obj())
+        safe_eval(isolate(lineage_cluster_plot_obj())),
+        safe_eval(isolate(lineage_knn_plot_obj())),
+        safe_eval(isolate(lineage_atac_cluster_plot_obj())),
+        safe_eval(isolate(lineage_drug_response_plot_obj())),
+        safe_eval(isolate(lineage_bubble_plot_obj())),
+        safe_eval(isolate(lineage_violin_plot_obj()))
       )
       purrr::walk(Filter(Negate(is.null), plots), print)
       dev.off()
       update_export_history(state, "Exported lineage plots")
-    }
-  )
-
-  output$download_single_plots <- downloadHandler(
-    filename = function() paste0("single_plots_", Sys.Date(), ".", input$export_single_format),
-    content = function(file) {
-      device <- switch(input$export_single_format, png = png, pdf = pdf, jpeg = jpeg)
-      device(file, width = 10, height = 7)
-      plots <- list(
-        isolate(single_cluster_plot_obj()),
-        isolate(single_knn_plot_obj()),
-        isolate(single_drug_response_plot_obj())
-      )
-      purrr::walk(Filter(Negate(is.null), plots), print)
-      dev.off()
-      update_export_history(state, "Exported single-cell plots")
     }
   )
 
@@ -2294,37 +1806,35 @@ server <- function(input, output, session) {
       device <- switch(input$custom_plot_format, png = png, pdf = pdf, jpeg = jpeg)
       device(file, width = 10, height = 7)
       plot_custom <- NULL
-      plot_custom <- NULL
+      safe_eval <- function(expr) {
+        tryCatch(expr, error = function(e) NULL)
+      }
+
       if (input$custom_plot_type == "rna_cluster") {
-        plot_custom <- if (input$custom_plot_level == "lineage") isolate(lineage_cluster_plot_obj()) else isolate(single_cluster_plot_obj())
+        plot_custom <- safe_eval(isolate(lineage_cluster_plot_obj()))
+      } else if (input$custom_plot_type == "atac_cluster") {
+        plot_custom <- safe_eval(isolate(lineage_atac_cluster_plot_obj()))
       } else if (input$custom_plot_type == "drug_embedding") {
-        plot_custom <- if (input$custom_plot_level == "lineage") isolate(lineage_drug_response_plot_obj()) else isolate(single_drug_response_plot_obj())
+        plot_custom <- safe_eval(isolate(lineage_drug_response_plot_obj()))
       } else if (input$custom_plot_type == "knn_embedding") {
-        plot_custom <- if (input$custom_plot_level == "lineage") isolate(lineage_knn_plot_obj()) else isolate(single_knn_plot_obj())
-      } else if (input$custom_plot_type == "bubble" && input$custom_plot_level == "lineage") {
-        plot_custom <- isolate(lineage_bubble_plot_obj())
+        plot_custom <- safe_eval(isolate(lineage_knn_plot_obj()))
       } else if (input$custom_plot_type == "bubble") {
-        showNotification("Bubble plots are only available for lineage level.", type = "warning")
+        plot_custom <- safe_eval(isolate(lineage_bubble_plot_obj()))
+      } else if (input$custom_plot_type == "violin") {
+        plot_custom <- safe_eval(isolate(lineage_violin_plot_obj()))
       }
       if (!is.null(plot_custom)) print(plot_custom)
       dev.off()
       update_export_history(state, glue::glue("Exported custom plot - {input$custom_plot_name}"))
     }
   )
-
   # -----------------------------------------------------------------------
   # Export info boxes -----------------------------------------------------
   # -----------------------------------------------------------------------
   output$lineage_export_status <- renderInfoBox({
-    status <- if (is.null(state$seurat$pb_rna)) "yellow" else "green"
-    message <- if (is.null(state$seurat$pb_rna)) "Lineage data not ready" else "Lineage data ready"
+    status <- if (is.null(state$dslt)) "yellow" else "green"
+    message <- if (is.null(state$dslt)) "Lineage data not ready" else "Lineage data ready"
     infoBox("Lineage dataset", message, icon = icon("sitemap"), color = status)
-  })
-
-  output$single_export_status <- renderInfoBox({
-    status <- if (is.null(state$seurat$sc_rna)) "yellow" else "green"
-    message <- if (is.null(state$seurat$sc_rna)) "Single-cell data not ready" else "Single-cell data ready"
-    infoBox("Single-cell dataset", message, icon = icon("braille"), color = status)
   })
 
   output$qc_settings_info <- renderInfoBox({
