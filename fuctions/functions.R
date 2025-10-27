@@ -12,6 +12,600 @@ source("https://raw.githubusercontent.com/YevhenAkimov/graphics-R/main/colors.R"
 options(shiny.maxRequestSize = 10240 * 1024^2) # 1000 MB
 options(future.globals.maxSize = 2 * 1024^3)  # 2 GB
 
+
+# -------------------------------------------------------------------------
+# Helper utilities --------------------------------------------------------
+# -------------------------------------------------------------------------
+
+read_table_like <- function(path) {
+  stopifnot(length(path) == 1)
+  ext <- tools::file_ext(path)
+  switch(tolower(ext),
+    rds = readRDS(path),
+    rdata = {
+      e <- new.env(parent = emptyenv())
+      load(path, envir = e)
+      e[[ls(e)[1]]]
+    },
+    csv = readr::read_csv(path, show_col_types = FALSE) %>% tibble::column_to_rownames(1),
+    tsv = readr::read_tsv(path, show_col_types = FALSE) %>% tibble::column_to_rownames(1),
+    txt = readr::read_tsv(path, show_col_types = FALSE) %>% tibble::column_to_rownames(1),
+    stop(glue::glue("Unsupported file extension: {ext}"))
+  )
+}
+
+read_mapping_file <- function(path) {
+  obj <- read_table_like(path)
+  if (is.data.frame(obj)) {
+    obj <- as.data.frame(obj)
+  }
+  stopifnot(is.data.frame(obj))
+  if (!"cell_barcode" %in% names(obj) && !is.null(rownames(obj))) {
+    obj$cell_barcode <- rownames(obj)
+  }
+  original_names <- names(obj)
+  lower_names <- tolower(original_names)
+  locate_column <- function(target) {
+    idx <- which(lower_names == tolower(target))
+    if (length(idx)) {
+      original_names[idx[1]]
+    } else {
+      NA_character_
+    }
+  }
+
+  rename_map <- c(
+    cell_barcode = locate_column("cell_barcode"),
+    UMI = locate_column("umi"),
+    Header = locate_column("header"),
+    Barcode = locate_column("barcode")
+  )
+
+  mapping <- obj
+  for (nm in names(rename_map)) {
+    col_name <- rename_map[[nm]]
+    if (!is.na(col_name)) {
+      mapping[[nm]] <- mapping[[col_name]]
+    }
+  }
+
+  required <- c("cell_barcode", "Barcode", "UMI", "Header")
+  missing_required <- setdiff(required, names(mapping))
+  if (length(missing_required)) {
+    stop(paste("Mapping file missing required columns:", paste(missing_required, collapse = ", ")))
+  }
+
+  mapping$cell_barcode <- as.character(mapping$cell_barcode)
+  mapping$Barcode <- as.character(mapping$Barcode)
+  mapping$UMI <- as.character(mapping$UMI)
+  mapping$Header <- as.character(mapping$Header)
+
+  mapping
+}
+
+validate_10x_components <- function(file_names) {
+  lower <- tolower(file_names)
+  required_patterns <- list(
+    matrix = "matrix",
+    mtx = "mtx",
+    barcodes = "barcode",
+    features = "feature|gene|peak"
+  )
+  checks <- vapply(required_patterns, function(pattern) {
+    any(grepl(pattern, lower))
+  }, logical(1))
+  if (!all(checks[c("matrix", "mtx", "barcodes", "features")])) {
+    stop("Please upload matrix.mtx(.gz), features/peaks.tsv(.gz), and barcodes.tsv(.gz) files, or provide a single 10x HDF5 (.h5/.hdf5) file.")
+  }
+  invisible(TRUE)
+}
+
+copy_upload_to_temp_dir <- function(file_info) {
+  if (is.null(file_info) || nrow(file_info) == 0) {
+    return(NULL)
+  }
+  validate_10x_components(file_info$name)
+  temp_dir <- tempfile("tenx_")
+  dir.create(temp_dir)
+  for (i in seq_len(nrow(file_info))) {
+    dest <- file.path(temp_dir, basename(file_info$name[i]))
+    file.copy(file_info$datapath[i], dest, overwrite = TRUE)
+  }
+  temp_dir
+}
+
+read_10x_from_upload <- function(file_info) {
+  if (is.null(file_info) || nrow(file_info) == 0) {
+    return(NULL)
+  }
+
+  lower_names <- tolower(file_info$name)
+  if (nrow(file_info) == 1 && grepl("\\.(h5|hdf5)$", lower_names)) {
+    temp_dir <- tempfile("tenx_h5_")
+    dir.create(temp_dir)
+    dest <- file.path(temp_dir, basename(file_info$name[1]))
+    file.copy(file_info$datapath[1], dest, overwrite = TRUE)
+    on.exit(unlink(temp_dir, recursive = TRUE), add = TRUE)
+    return(Read10X_h5(dest))
+  }
+
+  temp_dir <- copy_upload_to_temp_dir(file_info)
+  if (is.null(temp_dir)) {
+    return(NULL)
+  }
+  on.exit(unlink(temp_dir, recursive = TRUE), add = TRUE)
+  Read10X(data.dir = temp_dir)
+}
+
+preserve_uploaded_file <- function(file_info) {
+  if (is.null(file_info)) {
+    return(NULL)
+  }
+  stopifnot(nrow(file_info) == 1)
+  temp_dir <- tempfile("upload_")
+  dir.create(temp_dir)
+  dest <- file.path(temp_dir, basename(file_info$name))
+  file.copy(file_info$datapath, dest, overwrite = TRUE)
+  dest
+}
+
+preserve_fragments_with_index <- function(file_info) {
+  if (is.null(file_info) || nrow(file_info) == 0) {
+    return(list(fragments = NULL, index = NULL))
+  }
+
+  temp_dir <- tempfile("fragments_")
+  dir.create(temp_dir)
+
+  lower_names <- tolower(file_info$name)
+  dests <- character(nrow(file_info))
+  for (i in seq_len(nrow(file_info))) {
+    dests[i] <- file.path(temp_dir, basename(file_info$name[i]))
+    file.copy(file_info$datapath[i], dests[i], overwrite = TRUE)
+  }
+
+  fragment_idx <- which(grepl("\\.(tsv|tsv\\.gz)$", lower_names))
+  if (!length(fragment_idx)) {
+    return(list(fragments = NULL, index = NULL))
+  }
+
+  fragments_path <- dests[fragment_idx[1]]
+  index_candidates <- dests[grepl("\\.tbi(\\.gz)?$", lower_names)]
+
+  if (length(index_candidates) && grepl("\\.tbi\\.gz$", index_candidates[1])) {
+    if (requireNamespace("R.utils", quietly = TRUE)) {
+      dest_index <- sub("\\.gz$", "", index_candidates[1])
+      tryCatch({
+        R.utils::gunzip(index_candidates[1], destname = dest_index, overwrite = TRUE, remove = TRUE)
+        index_candidates[1] <- dest_index
+      }, error = function(e) {
+        NULL
+      })
+    }
+  }
+
+  list(
+    fragments = fragments_path,
+    index = if (length(index_candidates)) index_candidates[1] else NULL
+  )
+}
+
+ensure_tabix_index <- function(fragments_path) {
+  if (is.null(fragments_path) || !file.exists(fragments_path)) {
+    return(FALSE)
+  }
+
+  index_path <- paste0(fragments_path, ".tbi")
+  if (file.exists(index_path)) {
+    return(TRUE)
+  }
+
+  if (!requireNamespace("Rsamtools", quietly = TRUE)) {
+    return(FALSE)
+  }
+
+  if (!grepl("\\.gz$", fragments_path)) {
+    return(FALSE)
+  }
+
+  success <- tryCatch({
+    Rsamtools::indexTabix(fragments_path, format = "bed")
+    file.exists(index_path)
+  }, error = function(e) {
+    FALSE
+  })
+
+  success
+}
+
+normalize_matrix <- function(mat) {
+  if (is.data.frame(mat)) mat <- as.matrix(mat)
+  if (!is.matrix(mat)) {
+    stop("Expected a matrix-like object")
+  }
+  if (is.null(rownames(mat))) {
+    rownames(mat) <- make.unique(rep("sample", nrow(mat)))
+  }
+  if (is.null(colnames(mat))) {
+    colnames(mat) <- paste0("feature_", seq_len(ncol(mat)))
+  }
+  mode(mat) <- "numeric"
+  mat
+}
+
+ensure_numeric_vector <- function(x, default = NA_real_) {
+  if (length(x) == 0) return(default)
+  suppressWarnings(v <- as.numeric(x))
+  if (anyNA(v)) default else v
+}
+
+make_heatmap_df <- function(mat, rows = NULL, cols = NULL) {
+  if (is.null(mat)) return(NULL)
+  mat <- normalize_matrix(mat)
+  if (!is.null(rows)) mat <- mat[rows, , drop = FALSE]
+  if (!is.null(cols)) mat <- mat[, cols, drop = FALSE]
+  df <- as.data.frame(mat)
+  df$barcode <- rownames(df)
+  tidyr::pivot_longer(df, -barcode, names_to = "feature", values_to = "value")
+}
+
+combine_feature_plots <- function(result) {
+  if (is.null(result) || !is.list(result)) return(NULL)
+  violin <- result[["violin"]]
+  feature <- result[["feature_plot"]]
+  if (inherits(violin, "ggplot") && inherits(feature, "ggplot")) {
+    violin + feature
+  } else if (inherits(violin, "ggplot")) {
+    violin
+  } else if (inherits(feature, "ggplot")) {
+    feature
+  } else {
+    NULL
+  }
+}
+
+update_export_history <- function(state, action) {
+  state$export_history <- rbind(
+    state$export_history,
+    data.frame(timestamp = Sys.time(), action = action, stringsAsFactors = FALSE)
+  )
+}
+
+extract_drug_choices <- function(assay_list) {
+  if (is.null(assay_list)) return(character())
+  unique(unlist(lapply(assay_list, colnames)))
+}
+
+compose_upload_summary <- function(state) {
+  lineage_status <- if (is.null(state$dslt)) "Not loaded" else "Loaded"
+  sc_rna_status <- if (!is.null(state$seurat$pb_rna)) {
+    "Pseudo-bulk ready"
+  } else if (!is.null(state$seurat$sc_rna_raw)) {
+    "Uploaded"
+  } else {
+    "Not uploaded"
+  }
+  sc_atac_status <- if (!is.null(state$seurat$pb_atac)) {
+    "Pseudo-bulk ready"
+  } else if (!is.null(state$seurat$sc_atac_raw)) {
+    "Uploaded"
+  } else {
+    "Not uploaded"
+  }
+  mapping_status <- if (!is.null(state$mapping$rna) || !is.null(state$mapping$atac)) "Provided" else "Not provided"
+  drug_matrix_status <- if (is.null(state$drug_matrix)) "Not provided" else "Provided"
+  denoised_status <- if (length(state$denoised_assays)) paste(state$denoised_assays, collapse = ", ") else "None"
+
+  ready <- c()
+  if (!is.null(state$seurat$pb_rna)) ready <- c(ready, "RNA")
+  if (!is.null(state$seurat$pb_atac)) ready <- c(ready, "ATAC")
+
+  lines <- c(
+    paste("Lineage data:", lineage_status),
+    paste("Single-cell RNA:", sc_rna_status),
+    paste("Single-cell ATAC:", sc_atac_status),
+    paste("Mapping files:", mapping_status),
+    paste("External drug matrix:", drug_matrix_status),
+    paste("Denoised assays:", denoised_status)
+  )
+
+  if (length(ready)) {
+    lines <- c(lines, paste("Pseudo-bulk generated for:", paste(ready, collapse = ", ")))
+  }
+
+  paste(lines, collapse = "\n")
+}
+
+get_drug_scores <- function(assays, assay_name, drugs) {
+  if (length(drugs) == 0 || is.null(assays)) return(NULL)
+  mat <- assays[[assay_name]]
+  if (is.null(mat)) return(NULL)
+  mat <- normalize_matrix(mat)
+  drugs <- intersect(colnames(mat), drugs)
+  if (!length(drugs)) return(NULL)
+  vals <- rowMeans(mat[, drugs, drop = FALSE], na.rm = TRUE)
+  data.frame(barcode = rownames(mat), score = vals, stringsAsFactors = FALSE)
+}
+
+get_dslt_embedding_safe <- function(dslt, level, assay_name, slot) {
+  if (is.null(dslt) || !nzchar(level) || !nzchar(assay_name) || !nzchar(slot)) {
+    return(NULL)
+  }
+
+  tryCatch({
+    embeddings <- dslt[["embeddings"]]
+    if (is.null(embeddings)) return(NULL)
+    level_embeddings <- embeddings[[level]]
+    if (is.null(level_embeddings)) return(NULL)
+    assay_embeddings <- level_embeddings[[assay_name]]
+    if (is.null(assay_embeddings)) return(NULL)
+    assay_embeddings[[slot]]
+  }, error = function(e) NULL)
+}
+
+get_dslt_assay_safe <- function(dslt, level, assay_name) {
+  if (is.null(dslt) || !nzchar(level) || !nzchar(assay_name)) {
+    return(NULL)
+  }
+
+  tryCatch({
+    assays <- dslt[["assays"]]
+    if (is.null(assays)) return(NULL)
+    level_assays <- assays[[level]]
+    if (is.null(level_assays)) return(NULL)
+    level_assays[[assay_name]]
+  }, error = function(e) NULL)
+}
+
+get_dslt_column_metadata_safe <- function(dslt, assay_name, field, level = NULL) {
+  if (is.null(dslt) || !nzchar(assay_name) || !nzchar(field)) {
+    return(NULL)
+  }
+
+  column_meta <- tryCatch(dslt[["columnMetadata"]], error = function(e) NULL)
+  if (is.null(column_meta)) {
+    return(NULL)
+  }
+
+  levels_to_check <- if (is.null(level)) list(NULL) else as.list(level)
+
+  for (lvl in levels_to_check) {
+    container <- if (is.null(lvl)) {
+      column_meta[[assay_name]]
+    } else {
+      level_key <- as.character(lvl)
+      if (is.null(column_meta[[level_key]])) {
+        next
+      }
+      column_meta[[level_key]][[assay_name]]
+    }
+
+    if (is.null(container)) {
+      next
+    }
+
+    # Support both list-style access and data.frames where the field is a column
+    value <- container[[field]]
+    if (is.null(value) && is.data.frame(container) && field %in% colnames(container)) {
+      value <- container[[field]]
+    }
+
+    if (!is.null(value)) {
+      return(value)
+    }
+  }
+
+  NULL
+}
+
+ensure_archetype_metadata <- function(state, assay_name, level = "lineage") {
+  stopifnot(identical(level, "lineage"))
+  if (is.null(state$dslt) || !nzchar(assay_name)) {
+    return(NULL)
+  }
+
+  arch <- get_dslt_column_metadata_safe(state$dslt, assay_name, "archetypes", level = level)
+  if (!is.null(arch)) {
+    return(arch)
+  }
+
+  dslt_result <- tryCatch(
+    performArchetypeAndAnnotate(state$dslt, assay_name, levels = level),
+    error = function(e) {
+      showNotification(paste("Archetype analysis failed:", e$message), type = "error")
+      NULL
+    }
+  )
+
+  if (!is.null(dslt_result)) {
+    if (inherits(dslt_result, "DatasetLT") ||
+        (is.list(dslt_result) && all(c("assays", "embeddings") %in% names(dslt_result)))) {
+      state$dslt <- dslt_result
+    } else if (is.matrix(dslt_result) || is.data.frame(dslt_result)) {
+      arch <- as.matrix(dslt_result)
+  level_key <- "lineage"
+      if (is.null(state$dslt[["columnMetadata"]])) state$dslt[["columnMetadata"]] <- list()
+      if (is.null(state$dslt[["columnMetadata"]][[level_key]])) state$dslt[["columnMetadata"]][[level_key]] <- list()
+      if (is.null(state$dslt[["columnMetadata"]][[level_key]][[assay_name]])) {
+        state$dslt[["columnMetadata"]][[level_key]][[assay_name]] <- list()
+      }
+      state$dslt[["columnMetadata"]][[level_key]][[assay_name]][["archetypes"]] <- arch
+    }
+  }
+
+  get_dslt_column_metadata_safe(state$dslt, assay_name, "archetypes", level = level)
+}
+
+ensure_knn_embeddings <- function(state, assay_name, level = "lineage") {
+  if (is.null(state$dslt) || !nzchar(assay_name)) return(list(coords = NULL, clusters = NULL))
+  stopifnot(identical(level, "lineage"))
+  assay_present <- !is.null(get_dslt_assay_safe(state$dslt, level, assay_name))
+  if (!assay_present) {
+    return(list(coords = NULL, clusters = NULL))
+  }
+  coords <- get_dslt_embedding_safe(state$dslt, level, assay_name, "umap")
+  clusters <- get_dslt_embedding_safe(state$dslt, level, assay_name, "louvain_clusters")
+  if (is.null(coords) || is.null(clusters)) {
+    dslt_updated <- tryCatch(
+      runKnnAnalysisAndStore(state$dslt, assay_name, levels = level),
+      error = function(e) {
+        showNotification(paste("KNN analysis failed:", e$message), type = "error")
+        NULL
+      }
+    )
+    if (is.null(dslt_updated)) {
+      return(list(coords = NULL, clusters = NULL))
+    }
+    state$dslt <- dslt_updated
+    coords <- get_dslt_embedding_safe(state$dslt, level, assay_name, "umap")
+    clusters <- get_dslt_embedding_safe(state$dslt, level, assay_name, "louvain_clusters")
+  }
+  if (is.data.frame(clusters) && "louvain_clusters" %in% colnames(clusters)) {
+    clusters <- clusters$louvain_clusters
+  }
+  list(coords = coords, clusters = clusters)
+}
+
+cluster_palette <- c(
+  "#ebce2b", "#702c8c", "#db6917", "#96cde6", "#ba1c30", "#c0bd7f",
+  "#7f7e80", "#5fa641", "#d485b2", "#4277b6", "#df8461", "#463397",
+  "#e1a11a", "#91218c", "#e8e948", "#7e1510", "#92ae31", "#6f340d",
+  "#d32b1e", "#2b3514"
+)
+
+drug_palette <- rev(c('#67001f','#b2182b',"#f4a582",'#fddbc7',"#ffffff",'#d1e5f0','#92c5de','#2166ac','#053061'))
+
+get_dimensional_reduction <- function(assays) {
+  if (tolower(assays) == "atac") {
+    "lsi"
+  } else {
+    "pca"
+  }
+}
+
+ensure_pca <- function(seu, dslt = NULL, npcs = 30, assays = "RNA", level = "lineage") {
+  reduction <- get_dimensional_reduction(assays)
+  needs_reduction <- !reduction %in% names(Reductions(seu))
+  if (!needs_reduction) {
+    existing <- Embeddings(seu, reduction)
+    needs_reduction <- ncol(existing) < npcs
+  }
+  if (needs_reduction) {
+    if (tolower(assays) == "atac") {
+      res <- run_svd(seu, dslt = dslt, npcs = npcs, assays = assays, level = level)
+    } else {
+      res <- run_pca(seu, dslt = dslt, npcs = npcs, assays = assays, level = level)
+    }
+    seu <- res$seu
+    dslt <- res$dslt
+  } else if (!is.null(dslt)) {
+    dslt <- update_dslt_embedding(dslt, assays, level, reduction, Embeddings(seu, reduction))
+  }
+  list(seu = seu, dslt = dslt)
+}
+
+ensure_umap <- function(seu, dims, dslt = NULL, assays = "RNA", level = "lineage", reduction_name = "umap") {
+  dims_seq <- seq(dims[1], dims[2])
+  pca_res <- ensure_pca(seu, dslt = dslt, npcs = max(dims_seq), assays = assays, level = level)
+  seu <- pca_res$seu
+  dslt <- pca_res$dslt
+  reduction <- get_dimensional_reduction(assays)
+  if (!reduction_name %in% names(Reductions(seu))) {
+    res <- run_umap(seu,
+      dslt = dslt,
+      dimsl = dims_seq[1],
+      dimsh = dims_seq[length(dims_seq)],
+      assays = assays,
+      level = level,
+      reduction = reduction
+    )
+    seu <- res$seu
+    dslt <- res$dslt
+  } else if (!is.null(dslt)) {
+    dslt <- update_dslt_embedding(dslt, assays, level, reduction_name, Embeddings(seu, reduction_name))
+  }
+  list(seu = seu, reduction = reduction_name, dslt = dslt)
+}
+
+ensure_tsne <- function(seu, dims, dslt = NULL, assays = "RNA", level = "lineage", reduction_name = "tsne") {
+  dims_seq <- seq(dims[1], dims[2])
+  pca_res <- ensure_pca(seu, dslt = dslt, npcs = max(dims_seq), assays = assays, level = level)
+  seu <- pca_res$seu
+  dslt <- pca_res$dslt
+  reduction <- get_dimensional_reduction(assays)
+  if (!reduction_name %in% names(Reductions(seu))) {
+    res <- run_tsne(seu,
+      dslt = dslt,
+      dimsl = dims_seq[1],
+      dimsh = dims_seq[length(dims_seq)],
+      assays = assays,
+      level = level,
+      reduction = reduction
+    )
+    seu <- res$seu
+    dslt <- res$dslt
+  } else if (!is.null(dslt)) {
+    dslt <- update_dslt_embedding(dslt, assays, level, reduction_name, Embeddings(seu, reduction_name))
+  }
+  list(seu = seu, reduction = reduction_name, dslt = dslt)
+}
+
+ensure_clusters <- function(seu, dslt = NULL, res = 0.8, dims = 1:30, assays = "RNA", level = "lineage") {
+  dims_seq <- seq(dims[1], dims[length(dims)])
+  pca_res <- ensure_pca(seu, dslt = dslt, npcs = max(dims_seq), assays = assays, level = level)
+  seu <- pca_res$seu
+  dslt <- pca_res$dslt
+  reduction <- get_dimensional_reduction(assays)
+  graph_name <- paste0(DefaultAssay(seu), "_snn")
+  if (!graph_name %in% names(seu@graphs) || !"seurat_clusters" %in% colnames(seu@meta.data)) {
+    assay_name <- if (!is.null(assays)) toupper(assays) else toupper(assays)
+    cluster_args <- list(
+      seu = seu,
+      dimsl = dims_seq[1],
+      dimsh = dims_seq[length(dims_seq)],
+      reduction = reduction,
+      assays = assays
+    )
+    if (assay_name != "ATAC") {
+      cluster_args$res <- res
+    }
+    seu <- do.call(run_neighbors_and_clusters, cluster_args)
+  }
+  if (!is.null(dslt) && "seurat_clusters" %in% colnames(seu@meta.data)) {
+    dslt <- add_clusters_to_dslt(dslt, seu, assays = assays, level = level)
+  }
+  list(seu = seu, dslt = dslt)
+}
+
+ensure_kmeans_clusters <- function(seu, k, res = 0.5, dims = 1:30, dslt = NULL, assays = "RNA", level = "lineage") {
+  k <- max(2, as.integer(k))
+  dims_seq <- seq(dims[1], dims[length(dims)])
+  cluster_res <- ensure_clusters(seu,
+    dslt = dslt,
+    res = res,
+    dims = dims_seq,
+    assays = assays,
+    level = level
+  )
+  seu <- cluster_res$seu
+  dslt <- cluster_res$dslt
+  key <- paste0("kmeans", k)
+  if (!key %in% colnames(seu@meta.data)) {
+    reduction <- get_dimensional_reduction(assays)
+    seu <- run_kmeans_clustering(seu,
+      knum = k,
+      dimsl = dims_seq[1],
+      dimsh = dims_seq[length(dims_seq)],
+      reduction = reduction
+    )
+  }
+  if (!is.null(dslt)) {
+    dslt <- add_clusters_to_dslt(dslt, seu, knum = k, assays = assays, level = level)
+  }
+  list(seu = seu, column = key, dslt = dslt)
+}
+
+
 #------------------------------------------------seurat object
 # ATAC-seq
 #' 创建ATAC-seq Seurat对象
