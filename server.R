@@ -17,6 +17,17 @@ library(EnsDb.Hsapiens.v86)
 library(SingleCellExperiment)
 library(muscat)
 source("fuctions/functions.R")
+
+default_qc_plots <- list(
+  rna_violin = NULL,
+  rna_scatter = NULL,
+  rna_elbow = NULL,
+  atac_density = NULL,
+  atac_fragment = NULL,
+  atac_violin = NULL,
+  atac_depth = NULL,
+  integration = NULL
+)
 # -------------------------------------------------------------------------
 # Server ------------------------------------------------------------------
 # -------------------------------------------------------------------------
@@ -27,16 +38,7 @@ server <- function(input, output, session) {
     denoised_assays = character(),
     drug_matrix = NULL,
     lineage_drug_values = NULL,
-    qc = list(
-      rna_violin = NULL,
-      rna_scatter = NULL,
-      rna_elbow = NULL,
-      atac_density = NULL,
-      atac_fragment = NULL,
-      atac_violin = NULL,
-      atac_depth = NULL,
-      integration = NULL
-    ),
+    qc = default_qc_plots,
     qc_applied = FALSE,
     export_history = data.frame(timestamp = character(), action = character(), stringsAsFactors = FALSE),
     seurat = list(
@@ -427,39 +429,39 @@ server <- function(input, output, session) {
 
         incProgress(0.6, detail = "Restoring lineage data")
         state$dslt <- snapshot$dslt
-        if (!is.null(snapshot$denoised_assays)) {
-          state$denoised_assays <- snapshot$denoised_assays
-        } else {
-          state$denoised_assays <- character()
-        }
-        if (!is.null(snapshot$drug_matrix)) {
-          state$drug_matrix <- snapshot$drug_matrix
-          drug_matrix_text("External drug matrix integrated.")
-        }
+        state$denoised_assays <- character()
+        state$drug_matrix <- NULL
+        drug_matrix_text("Optional: upload external drug matrix.")
+        state$mapping <- list(rna = NULL, atac = NULL)
         if (!is.null(snapshot$pb_rna)) {
           state$seurat$pb_rna <- snapshot$pb_rna
+        } else {
+          state$seurat$pb_rna <- NULL
         }
         if (!is.null(snapshot$pb_atac)) {
           state$seurat$pb_atac <- snapshot$pb_atac
+        } else {
+          state$seurat$pb_atac <- NULL
         }
         state$seurat$sc_rna_raw <- NULL
         state$seurat$sc_rna <- NULL
         state$seurat$sc_atac_raw <- NULL
         state$seurat$sc_atac <- NULL
-        if (!is.null(snapshot$mapping) && is.list(snapshot$mapping)) {
-          state$mapping <- modifyList(state$mapping, snapshot$mapping)
-        }
-        if (!is.null(state$dslt[["assays"]][["lineage"]])) {
-          state$lineage_drug_values <- state$dslt[["assays"]][["lineage"]]
-        } else if (!is.null(snapshot$lineage_drug_values)) {
-          state$lineage_drug_values <- snapshot$lineage_drug_values
+        lineage_values <- state$dslt[["assays"]][["lineage"]]
+        if (!is.null(lineage_values)) {
+          state$lineage_drug_values <- lineage_values
+        } else {
+          state$lineage_drug_values <- list()
         }
         if (!is.null(snapshot$qc) && is.list(snapshot$qc)) {
-          state$qc <- modifyList(state$qc, snapshot$qc)
+          state$qc <- modifyList(default_qc_plots, snapshot$qc)
+        } else {
+          state$qc <- default_qc_plots
         }
 
         incProgress(0.8, detail = "Refreshing selections")
         lineage_assays <- names(state$lineage_drug_values)
+        if (is.null(lineage_assays)) lineage_assays <- character(0)
         updatePickerInput(session, "denoise_assays_choice",
           choices = lineage_assays,
           selected = intersect(state$denoised_assays, lineage_assays)
@@ -470,12 +472,13 @@ server <- function(input, output, session) {
           selected = if (length(lineage_assays)) lineage_assays[1] else character(0)
         )
 
-        state$qc_applied <- TRUE
+        state$qc_applied <- !is.null(snapshot$qc)
         if (!is.null(state$seurat$pb_rna) || !is.null(state$seurat$pb_atac)) {
           single_cell_status("Pseudo-bulk data restored from snapshot.")
         } else {
           single_cell_status("Awaiting single-cell uploads.")
         }
+        output$qc_snapshot_status <- renderText(paste("QC snapshot loaded from", input$qc_snapshot_file$name))
         output$lineage_upload_status <- renderText("Lineage data restored from QC snapshot.")
         output$upload_summary <- renderText(compose_upload_summary(state))
         showNotification("QC snapshot loaded successfully!", type = "message", duration = 5)
@@ -666,6 +669,8 @@ server <- function(input, output, session) {
         seu_atac <- FindTopFeatures(seu_atac, min.cutoff = "q0", verbose = FALSE)
         seu_atac <- RunSVD(seu_atac, verbose = FALSE)
         state$seurat$sc_atac <- seu_atac
+
+        state$qc$atac_depth <- DepthCor(seu_atac)
       }
 
       incProgress(0.45, detail = "Mapping to lineage level...")
@@ -808,7 +813,8 @@ server <- function(input, output, session) {
         snapshot_data <- list(
           dslt = state$dslt,
           pb_rna = state$seurat$pb_rna,
-          pb_atac = state$seurat$pb_atac
+          pb_atac = state$seurat$pb_atac,
+          qc = state$qc
         )
         filename <- paste0("qc_snapshot_", format(Sys.time(), "%Y-%m-%d_%H%M%S"), ".rds")
         saveRDS(snapshot_data, file = filename)
@@ -839,6 +845,11 @@ server <- function(input, output, session) {
   output$qc_atac_Density <- renderPlot({
     if (is.null(state$qc$atac_density)) return(NULL)
     state$qc$atac_density
+  })
+
+  output$qc_atac_depth_correlation <- renderPlot({
+    if (is.null(state$qc$atac_depth)) return(NULL)
+    state$qc$atac_depth
   })
 
   output$qc_atac_Fragment <- renderPlot({
