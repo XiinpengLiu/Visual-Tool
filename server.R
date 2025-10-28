@@ -811,6 +811,13 @@ server <- function(input, output, session) {
 
       qc_light <- lapply(state$qc, compact_plot)
 
+      state$lineage_drug_values <- state$dslt[["assays"]][["lineage"]]
+      lineage_assays <- names(state$lineage_drug_values)
+      updatePickerInput(session, "lineage_rds_object_select",
+        choices = lineage_assays,
+        selected = if (length(lineage_assays)) lineage_assays[1] else character(0)
+      )
+
       tryCatch({
         snapshot_data <- list(
           dslt = state$dslt,
