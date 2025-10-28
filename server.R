@@ -1120,6 +1120,16 @@ server <- function(input, output, session) {
     if (is.null(plot_obj)) return(NULL)
     plot_obj
   })
+
+  output$lineage_river_plot <- renderPlot({
+    req(state$dslt)
+    plot_lineage_river(dslt = state$dslt, embedding_name = settings$dataset)
+  })
+
+  output$lineage_size_histogram <- renderPlot({
+    req(state$dslt, state$seurat$pb_rna)
+    plot_rna_atac_hist(dslt = state$dslt, seu_rna = state$seurat$pb_rna, seu_atac = state$seurat$pb_atac)
+  })
   # -----------------------------------------------------------------------
   # Export handlers -------------------------------------------------------
   # -----------------------------------------------------------------------
