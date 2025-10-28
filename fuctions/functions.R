@@ -910,7 +910,7 @@ calculate_tss_enrichment <- function(se_atac) {
 #' @return ggplot图形对象
 #' @export
 plot_tss_density_scatter <- function(se_atac) {
-  p <- DensityScatter(se_atac, x = 'nCount_peaks', y = 'TSS_fragments', 
+  p <- DensityScatter(se_atac, x = 'nCount_peaks', y = 'TSS.enrichment', 
                       log_x = TRUE, quantiles = TRUE)
   return(p)
 }
@@ -962,7 +962,7 @@ plot_atac_qc_violins <- function(se_atac,
   atsc2 <- VlnPlot(object = se_atac, features = 'pct_reads_in_peaks') +
     geom_hline(yintercept = pct_reads_min, linetype = "dashed", color = "red")
   
-  atsc3 <- VlnPlot(object = se_atac, features = 'TSS_fragments') +
+  atsc3 <- VlnPlot(object = se_atac, features = 'TSS.enrichment') +
     geom_hline(yintercept = tss_min, linetype = "dashed", color = "red")
   
   atsc4 <- VlnPlot(object = se_atac, features = 'nucleosome_signal') +
@@ -986,7 +986,7 @@ plot_atac_qc_violins <- function(se_atac,
 #' @param pct_reads_min pct_reads_in_peaks最小值,默认20
 #' @param blacklist_max blacklist_ratio最大值,默认0.02
 #' @param nucleosome_max nucleosome_signal最大值,默认4
-#' @param tss_min TSS_fragments最小值,默认2
+#' @param tss_min TSS.enrichment最小值,默认2
 #' @param suffix 细胞后缀过滤,默认"-1$"
 #' @param verbose 是否打印过滤信息,默认TRUE
 #' @return 过滤后的Seurat对象
@@ -1012,7 +1012,7 @@ filter_atac_cells <- function(se_atac,
       pct_reads_in_peaks > pct_reads_min & 
       blacklist_ratio < blacklist_max & 
       nucleosome_signal < nucleosome_max & 
-      TSS_fragments > tss_min
+      TSS.enrichment > tss_min
   )
   
   if (verbose) {
@@ -1861,7 +1861,68 @@ plot_rna_atac_hist <- function(dslt, seu_rna, seu_atac = NULL, binwidth = 1) {
 }
 
 
-compact_plot <- function(p) {
-  if (is.null(p) || !inherits(p, "gg")) return(NULL)
-  ggplot2::ggplotGrob(p)
+compact_plot <- function(p, width = 3000, height = 1900, res = 240, bg = "white") {
+  if (is.null(p)) return(NULL)
+  if (!requireNamespace("png", quietly = TRUE))  stop("Package 'png' is required.")
+  if (!requireNamespace("ragg", quietly = TRUE)) stop("Package 'ragg' is required.")
+
+  tmp <- tempfile(fileext = ".png")
+  dev_open <- FALSE
+  draw_ok  <- FALSE
+  err_msg  <- NULL
+
+  tryCatch({
+    ragg::agg_png(filename = tmp, width = width, height = height, units = "px", res = res, background = bg)
+    dev_open <- TRUE
+
+    grid::grid.newpage()
+    if (grid::is.grob(p)) {
+      grid::grid.draw(p)
+      draw_ok <- TRUE
+    } else {
+      draw_ok <- tryCatch({ print(p); TRUE }, error = function(e) { err_msg <<- conditionMessage(e); FALSE })
+      if (!draw_ok && inherits(p, "gg")) {
+        draw_ok <- tryCatch({
+          grid::grid.draw(ggplot2::ggplotGrob(p)); TRUE
+        }, error = function(e) { err_msg <<- conditionMessage(e); FALSE })
+      }
+    }
+  }, error = function(e) {
+    err_msg <<- conditionMessage(e)
+  }, finally = {
+    if (dev_open) grDevices::dev.off()
+  })
+
+  if (!draw_ok || !file.exists(tmp)) {
+    if (file.exists(tmp)) unlink(tmp)
+    return(NULL)
+  }
+
+  img <- png::readPNG(tmp, native = TRUE)
+  unlink(tmp)
+
+  ratio <- tryCatch({ dim(img)[1] / dim(img)[2] }, error = function(...) NA_real_)
+  if (!is.finite(ratio) || ratio <= 0) ratio <- 1
+
+  if (ratio <= 1) {
+    w_unit <- grid::unit(1, "npc")
+    h_unit <- grid::unit(ratio, "npc")
+  } else {
+    w_unit <- grid::unit(1 / ratio, "npc")
+    h_unit <- grid::unit(1, "npc")
+  }
+
+  g <- grid::rasterGrob(img, width = w_unit, height = h_unit, interpolate = FALSE)
+
+  attr(g, "meta") <- list(
+    type       = "rasterGrob_snapshot",
+    width_px   = width,
+    height_px  = height,
+    res        = res,
+    background = bg,
+    created_at = Sys.time(),
+    notes      = err_msg
+  )
+  g
 }
+

@@ -583,11 +583,11 @@ ui <- dashboardPage(
           column(width = 9,
             fluidRow(
               box(title = "RNA-seq clustering", width = 6, plotOutput("lineage_rna_cluster_plot")),
-              box(title = "KNN embedding", width = 6, plotOutput("lineage_knn_plot"))
+              box(title = "Drug response clustering", width = 6, plotOutput("lineage_knn_plot"))
             ),
             fluidRow(
               box(title = "ATAC-seq clustering", width = 6, plotOutput("lineage_atac_cluster_plot")),
-              box(title = "Drug response embedding", width = 6, plotOutput("lineage_drug_response_plot"))
+              box(title = "Drug response data", width = 6, plotOutput("lineage_drug_response_plot"))
             ),
             fluidRow(
               box(title = "Cluster/Archetype bubble", width = 12, plotOutput("lineage_bubble_plot"))

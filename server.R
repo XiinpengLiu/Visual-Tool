@@ -586,7 +586,7 @@ server <- function(input, output, session) {
   })
 
   observeEvent(input$apply_qc_settings, {
-    withProgress(message = "Applying QC...", value = 0, {
+    withProgress(message = "Grab a coffee :)", value = 0, {
       validate(need(!is.null(state$dslt), "Load datasets before applying QC."))
 
       suffix <- input$barcode_suffix
@@ -597,13 +597,13 @@ server <- function(input, output, session) {
       had_single_inputs <- !is.null(state$seurat$sc_rna_raw) || !is.null(state$seurat$sc_atac_raw)
 
       if (!is.null(state$seurat$sc_rna_raw)) {
-        incProgress(0.05, detail = "Filtering RNA cells by suffix...")
+        setProgress(0.05, detail = "Filtering RNA cells by suffix...")
         seu <- state$seurat$sc_rna_raw
         if (!is.null(suffix)) {
           seu <- tryCatch(filter_cells_by_suffix(seu, suffix = suffix), error = function(e) seu)
         }
 
-        incProgress(0.1, detail = "Generating RNA QC plots...")
+        setProgress(0.1, detail = "Generating RNA QC plots...")
         state$qc$rna_violin <- plot_rna_qc_violin(
           seu,
           min_features = input$rna_nfeature_min,
@@ -612,7 +612,7 @@ server <- function(input, output, session) {
         )
         state$qc$rna_scatter <- plot_rna_qc_scatter(seu)
 
-        incProgress(0.15, detail = "Filtering RNA cells by QC thresholds...")
+        setProgress(0.12, detail = "Filtering RNA cells by QC thresholds...")
         seu <- filter_rna_qc(
           seu,
           min_features = input$rna_nfeature_min,
@@ -623,7 +623,7 @@ server <- function(input, output, session) {
           verbose = FALSE
         )
 
-        incProgress(0.2, detail = "Normalizing single-cell RNA data...")
+        setProgress(0.15, detail = "Normalizing single-cell RNA data...")
         seu <- SCTransform(seu, verbose = FALSE)
         seu <- RunPCA(seu, npcs = 30, verbose = FALSE)
         state$qc$rna_elbow <- ElbowPlot(seu)
@@ -631,17 +631,17 @@ server <- function(input, output, session) {
       }
 
       if (!is.null(state$seurat$sc_atac_raw)) {
-        incProgress(0.25, detail = "Filtering ATAC cells by suffix...")
+        setProgress(0.20, detail = "Filtering ATAC cells by suffix...")
         seu_atac <- state$seurat$sc_atac_raw
         if (!is.null(suffix)) {
           seu_atac <- tryCatch(filter_cells_by_suffix(seu_atac, suffix = suffix), error = function(e) seu_atac)
         }
 
-        incProgress(0.3, detail = "Computing ATAC QC metrics...")
+        setProgress(0.25, detail = "Computing ATAC QC and generating plots...")
         seu_atac <- calculate_nucleosome_signal(seu_atac)
-        if (!"TSS_fragments" %in% colnames(seu_atac@meta.data)) {
-          seu_atac <- calculate_tss_enrichment(seu_atac)
-        }
+
+        seu_atac <- calculate_tss_enrichment(seu_atac)
+        
         seu_atac <- calculate_atac_qc_metrics(seu_atac)
 
         state$qc$atac_density <- plot_tss_density_scatter(seu_atac)
@@ -656,7 +656,7 @@ server <- function(input, output, session) {
           blacklist_max = input$atac_blacklist_ratio_max
         )
 
-        incProgress(0.35, detail = "Filtering ATAC cells by QC thresholds...")
+        setProgress(0.30, detail = "Filtering ATAC cells by QC thresholds...")
         seu_atac <- filter_atac_cells(
           seu_atac,
           ncount_min = input$atac_peak_fragments_min,
@@ -667,6 +667,7 @@ server <- function(input, output, session) {
           tss_min = input$atac_tss_enrichment_min,
           verbose = FALSE
         )
+        setProgress(0.40, detail = "Normalizing single-cell ATAC data...")
         seu_atac <- RunTFIDF(seu_atac, verbose = FALSE)
         seu_atac <- FindTopFeatures(seu_atac, min.cutoff = "q0", verbose = FALSE)
         seu_atac <- RunSVD(seu_atac, verbose = FALSE)
@@ -675,7 +676,7 @@ server <- function(input, output, session) {
         state$qc$atac_depth <- DepthCor(seu_atac)
       }
 
-      incProgress(0.45, detail = "Mapping to lineage level...")
+      setProgress(0.50, detail = "Mapping scRNA to lineage level...")
 
       if (!is.null(state$mapping$rna) && !is.null(state$seurat$sc_rna)) {
         pb_rna <- lineage_map_seurat_rna(
@@ -713,6 +714,8 @@ server <- function(input, output, session) {
         state$seurat$pb_rna <- pb_rna
         lineage_rna_mapped <- TRUE
       }
+
+      setProgress(0.60, detail = "Mapping scATAC to lineage level...")
 
       if (!is.null(state$mapping$atac) && !is.null(state$seurat$sc_atac)) {
         pb_atac <- lineage_map_seurat_atac(
@@ -775,6 +778,8 @@ server <- function(input, output, session) {
         single_cell_status("Single-cell inputs processed without mapping; provide barcode mapping to create pseudo-bulk data.")
       }
 
+      setProgress(0.70, detail = "Run KNN and archetype of smoothed assays...")
+
       if (length(state$denoised_assays)) {
         for (assay in state$denoised_assays) {
           if (!nzchar(assay)) next
@@ -805,6 +810,8 @@ server <- function(input, output, session) {
       })
 
       output$upload_summary <- renderText(compose_upload_summary(state))
+
+      setProgress(0.90, detail = "Saving QC snapshot...")
 
       element_to_move <- state$denoised_assays
       all_names <- names(state$dslt[["assays"]][["lineage"]])
@@ -1210,12 +1217,12 @@ server <- function(input, output, session) {
     content = function(file) {
       device <- switch(input$export_qc_format, png = png, pdf = pdf, jpeg = jpeg)
       device(file, width = 10, height = 7)
-      if (!is.null(state$qc$rna_violin)) print(state$qc$rna_violin)
-      if (!is.null(state$qc$rna_scatter)) print(state$qc$rna_scatter)
-      if (!is.null(state$qc$rna_elbow)) print(state$qc$rna_elbow)
-      if (!is.null(state$qc$atac_violin)) print(state$qc$atac_violin)
-      if (!is.null(state$qc$atac_density)) print(state$qc$atac_density)
-      if (!is.null(state$qc$atac_fragment)) print(state$qc$atac_fragment)
+      if (!is.null(state$qc$rna_violin)) draw_qc_plot(state$qc$rna_violin)
+      if (!is.null(state$qc$rna_scatter)) draw_qc_plot(state$qc$rna_scatter)
+      if (!is.null(state$qc$rna_elbow)) draw_qc_plot(state$qc$rna_elbow)
+      if (!is.null(state$qc$atac_violin)) draw_qc_plot(state$qc$atac_violin)
+      if (!is.null(state$qc$atac_density)) draw_qc_plot(state$qc$atac_density)
+      if (!is.null(state$qc$atac_fragment)) draw_qc_plot(state$qc$atac_fragment)
       dev.off()
       update_export_history(state, "Exported QC plots")
     }
