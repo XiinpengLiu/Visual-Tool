@@ -936,11 +936,13 @@ server <- function(input, output, session) {
     settings <- lineage_plot_settings()
     assay_name <- settings$dataset
     req(assay_name)
-    res <- ensure_knn_embeddings(state, assay_name, level = "lineage")
-    validate(need(!is.null(res$coords) && !is.null(res$clusters), "Run KNN analysis on the selected assay."))
-    coords_df <- res$coords %>%
+
+    coords <- get_dslt_embedding_safe(state$dslt, "lineage", assay_name, "umap")
+    clusters <- get_dslt_embedding_safe(state$dslt, "lineage", assay_name, "louvain_clusters")
+    
+    coords_df <- coords %>%
     rownames_to_column(var = "sequence")
-    clusters_df <- res$clusters %>%
+    clusters_df <- clusters %>%
     rownames_to_column(var = "sequence")
     plot_data <- left_join(coords_df, clusters_df, by = "sequence")
     ggplot(plot_data, aes(x = V1, y = V2, color = as.factor(louvain_clusters))) +
@@ -1020,15 +1022,15 @@ server <- function(input, output, session) {
     assay_name <- settings$dataset
     if (!nzchar(assay_name)) return(NULL)
     if (settings$bubble_mode == "cluster") {
-      res <- ensure_knn_embeddings(state, assay_name, level = "lineage")
+
       mat <- get_dslt_assay_safe(state$dslt, "lineage", assay_name)
-      if (is.null(res$clusters) || is.null(mat)) return(NULL)
-      cluster_df <- as.data.frame(res$clusters)
+      clusters <- get_dslt_embedding_safe(state$dslt, "lineage", assay_name, "louvain_clusters")
+      cluster_df <- as.data.frame(clusters)
+      mat_df <- as.data.frame(mat)
       cluster_vals <- if ("louvain_clusters" %in% colnames(cluster_df)) cluster_df$louvain_clusters else cluster_df[[1]]
       cluster_vals <- as.factor(cluster_vals)
-      mat_df <- as.data.frame(as.matrix(mat))
 
-      summarized_clusters <- summarize_columns(mat_df, cluster_vals, order_rows = TRUE)
+      summarized_clusters <- summarize_columns(mat_df, cluster_vals)
       summarized_mat <- as.matrix(summarized_clusters)
       ggshape_heatmap(
         summarized_mat,
