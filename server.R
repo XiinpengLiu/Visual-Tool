@@ -12,6 +12,7 @@ library(purrr)
 library(readr)
 library(stringr)
 library(ggplot2)
+library(grid)
 library(glue)
 library(EnsDb.Hsapiens.v86)
 library(SingleCellExperiment)
@@ -837,39 +838,42 @@ server <- function(input, output, session) {
   # -----------------------------------------------------------------------
   # QC plots --------------------------------------------------------------
   # -----------------------------------------------------------------------
+  draw_qc_plot <- function(plot_obj) {
+    if (is.null(plot_obj)) return(NULL)
+    if (grid::is.grob(plot_obj)) {
+      grid::grid.newpage()
+      grid::grid.draw(plot_obj)
+      return(invisible(NULL))
+    }
+    plot_obj
+  }
+
   output$qc_rna_qc <- renderPlot({
-    if (is.null(state$qc$rna_violin)) return(NULL)
-    state$qc$rna_violin
+    draw_qc_plot(state$qc$rna_violin)
   })
 
   output$qc_rna_pca_elbow <- renderPlot({
-    if (is.null(state$qc$rna_elbow)) return(NULL)
-    state$qc$rna_elbow
+    draw_qc_plot(state$qc$rna_elbow)
   })
 
   output$qc_rna_fea <- renderPlot({
-    if (is.null(state$qc$rna_scatter)) return(NULL)
-    state$qc$rna_scatter
+    draw_qc_plot(state$qc$rna_scatter)
   })
 
   output$qc_atac_Density <- renderPlot({
-    if (is.null(state$qc$atac_density)) return(NULL)
-    state$qc$atac_density
+    draw_qc_plot(state$qc$atac_density)
   })
 
   output$qc_atac_depth_correlation <- renderPlot({
-    if (is.null(state$qc$atac_depth)) return(NULL)
-    state$qc$atac_depth
+    draw_qc_plot(state$qc$atac_depth)
   })
 
   output$qc_atac_Fragment <- renderPlot({
-    if (is.null(state$qc$atac_fragment)) return(NULL)
-    state$qc$atac_fragment
+    draw_qc_plot(state$qc$atac_fragment)
   })
 
   output$qc_atac_QC <- renderPlot({
-    if (is.null(state$qc$atac_violin)) return(NULL)
-    state$qc$atac_violin
+    draw_qc_plot(state$qc$atac_violin)
   })
 
   # -----------------------------------------------------------------------

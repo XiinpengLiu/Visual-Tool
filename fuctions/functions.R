@@ -510,7 +510,7 @@ ensure_umap <- function(seu, dims, dslt = NULL, assays = "RNA", level = "lineage
   seu <- pca_res$seu
   dslt <- pca_res$dslt
   reduction <- get_dimensional_reduction(assays)
-  if (!reduction_name %in% names(Reductions(seu))) {
+  if (!reduction_name %in% Reductions(seu)) {
     res <- run_umap(seu,
       dslt = dslt,
       dimsl = dims_seq[1],
@@ -533,7 +533,7 @@ ensure_tsne <- function(seu, dims, dslt = NULL, assays = "RNA", level = "lineage
   seu <- pca_res$seu
   dslt <- pca_res$dslt
   reduction <- get_dimensional_reduction(assays)
-  if (!reduction_name %in% names(Reductions(seu))) {
+  if (!reduction_name %in% Reductions(seu)) {
     res <- run_tsne(seu,
       dslt = dslt,
       dimsl = dims_seq[1],
@@ -1685,7 +1685,7 @@ plot_multi_violin_and_feature <- function(
   
   if (is.null(assay)) assay <- DefaultAssay(seu)
   if (is.null(reduction)) {
-    rds <- names(Reductions(seu))
+    rds <- Reductions(seu)
     reduction <- if ("umap" %in% rds) "umap" else if ("tsne" %in% rds) "tsne" else "pca"
   }
   
