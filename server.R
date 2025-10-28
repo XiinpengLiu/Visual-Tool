@@ -16,6 +16,7 @@ library(glue)
 library(EnsDb.Hsapiens.v86)
 library(SingleCellExperiment)
 library(muscat)
+library(ggalluvial)
 source("fuctions/functions.R")
 
 default_qc_plots <- list(
@@ -1132,7 +1133,7 @@ server <- function(input, output, session) {
 
   output$lineage_river_plot <- renderPlot({
     req(state$dslt)
-    plot_lineage_river(dslt = state$dslt, embedding_name = settings$dataset)
+    plot_lineage_river(dslt = state$dslt, embedding_name = input$lineage_rds_object_select)
   })
 
   output$lineage_size_histogram <- renderPlot({

@@ -1768,63 +1768,62 @@ plot_multi_violin_and_feature <- function(
 
 
 plot_lineage_river <- function(dslt = dslt, embedding_name = "cGR_smoothed") {
-  library(dplyr)
-  library(tidyr)
-  library(ggplot2)
-  library(ggalluvial)
-  
   rna_clust <- dslt[["columnMetadata"]][["RNA"]][["lineage"]] %>%
-    select(Barcode, s) %>% rename(s_rna = s)
+    dplyr::select(Barcode, s) %>% dplyr::rename(s_rna = s)
   
   cg_obj <- dslt[["embeddings"]][["lineage"]][[embedding_name]][["louvain_clusters"]]
   cg_clust <- if (is.data.frame(cg_obj)) cg_obj else data.frame(louvain = cg_obj)
   if (!"Barcode" %in% names(cg_clust)) cg_clust$Barcode <- rownames(cg_clust)
   names(cg_clust)[names(cg_clust) == "louvain_clusters"] <- "louvain"
   cg_clust <- cg_clust %>%
-    select(Barcode, louvain) %>%
-    mutate(louvain = as.factor(louvain))
+    dplyr::select(Barcode, louvain) %>%
+    dplyr::mutate(louvain = as.factor(louvain))
   
   atac_ok <- FALSE
   atac_try <- try(dslt[["columnMetadata"]][["ATAC"]][["lineage"]], silent = TRUE)
   if (!inherits(atac_try, "try-error") && !is.null(atac_try) && NROW(atac_try) > 0) atac_ok <- TRUE
   if (atac_ok) {
-    atac_clust <- atac_try %>% select(Barcode, s) %>% rename(s_atac = s)
+    atac_clust <- atac_try %>% dplyr::select(Barcode, s) %>% dplyr::rename(s_atac = s)
   }
   
   if (atac_ok) {
     df <- rna_clust %>%
-      inner_join(cg_clust,  by = "Barcode") %>%
-      inner_join(atac_clust, by = "Barcode") %>%
-      mutate(s_rna = as.factor(s_rna), s_atac = as.factor(s_atac))
+      dplyr::inner_join(cg_clust,  by = "Barcode") %>%
+      dplyr::inner_join(atac_clust, by = "Barcode") %>%
+      dplyr::mutate(s_rna = as.factor(s_rna), s_atac = as.factor(s_atac))
     dat_long <- df %>%
-      transmute(Barcode, `ATAC louvain` = s_atac,
-                `Drug: louvain` = louvain, `RNA louvain` = s_rna) %>%
-      pivot_longer(cols = c(`ATAC louvain`, `Drug: louvain`, `RNA louvain`),
-                   names_to = "axis", values_to = "cluster") %>%
-      mutate(freq = 1L,
-             axis = factor(axis, levels = c("ATAC louvain", "Drug: louvain", "RNA louvain")))
+      dplyr::transmute(Barcode, `ATAC louvain` = s_atac,
+                       `Drug: louvain` = louvain, `RNA louvain` = s_rna) %>%
+      tidyr::pivot_longer(cols = c(`ATAC louvain`, `Drug: louvain`, `RNA louvain`),
+                          names_to = "axis", values_to = "cluster") %>%
+      dplyr::mutate(freq = 1L,
+                    axis = factor(axis, levels = c("ATAC louvain", "Drug: louvain", "RNA louvain")))
   } else {
     df <- rna_clust %>%
-      inner_join(cg_clust, by = "Barcode") %>%
-      mutate(s_rna = as.factor(s_rna))
+      dplyr::inner_join(cg_clust, by = "Barcode") %>%
+      dplyr::mutate(s_rna = as.factor(s_rna))
     dat_long <- df %>%
-      transmute(Barcode, `Drug: louvain` = louvain, `RNA louvain` = s_rna) %>%
-      pivot_longer(cols = c(`Drug: louvain`, `RNA louvain`),
-                   names_to = "axis", values_to = "cluster") %>%
-      mutate(freq = 1L,
-             axis = factor(axis, levels = c("Drug: louvain", "RNA louvain")))
+      dplyr::transmute(Barcode, `Drug: louvain` = louvain, `RNA louvain` = s_rna) %>%
+      tidyr::pivot_longer(cols = c(`Drug: louvain`, `RNA louvain`),
+                          names_to = "axis", values_to = "cluster") %>%
+      dplyr::mutate(freq = 1L,
+                    axis = factor(axis, levels = c("Drug: louvain", "RNA louvain")))
   }
   
 
-  p <- ggplot(dat_long,
-              aes(x = axis, stratum = cluster, alluvium = Barcode,
-                  y = freq, fill = cluster, label = cluster)) +
-    scale_x_discrete(expand = c(.1, .1)) +
-    geom_flow() +
-    geom_stratum(alpha = .5) +
-    geom_text(stat = "stratum", size = 4) +
-    theme_minimal() +
-    theme(legend.position = "none")
+  p <- ggplot2::ggplot(
+    dat_long,
+    ggplot2::aes(
+      x = axis, stratum = cluster, alluvium = Barcode,
+      y = freq, fill = cluster, label = cluster
+    )
+  ) +
+    ggplot2::scale_x_discrete(expand = c(.1, .1)) +
+    ggalluvial::geom_flow() +
+    ggalluvial::geom_stratum(alpha = .5) +
+    ggalluvial::stat_stratum(geom = "text", aes(label = after_stat(stratum)), size = 4) +
+    ggplot2::theme_minimal() +
+    ggplot2::theme(legend.position = "none")
   
   return(p)
 }
@@ -1840,14 +1839,13 @@ plot_rna_atac_hist <- function(dslt, seu_rna, seu_atac = NULL, binwidth = 1) {
   
   make_hist <- function(df, keep_ids, title) {
     df_f <- df %>%
-      filter(Barcode %in% keep_ids) %>%
-      distinct(Barcode, .keep_all = TRUE)
+      dplyr::filter(Barcode %in% keep_ids) %>%
+      dplyr::distinct(Barcode, .keep_all = TRUE)
     
-    ggplot(df_f, aes(x = n_cells)) +
-      geom_histogram(binwidth = binwidth, fill = "steelblue", color = "white") +
-      scale_y_continuous(trans = "log1p") +
-      labs(x = "n_cells", y = "Count (log1p)", title = title) +
-      theme_classic()
+    ggplot2::ggplot(df_f, ggplot2::aes(x = n_cells)) +
+      ggplot2::geom_histogram(binwidth = binwidth, fill = "steelblue", color = "white") +
+      ggplot2::labs(x = "n_cells", y = "Count (log1p)", title = title) +
+      ggplot2::theme_classic()
   }
   
   # 绘制 RNA 图
@@ -1865,5 +1863,5 @@ plot_rna_atac_hist <- function(dslt, seu_rna, seu_atac = NULL, binwidth = 1) {
 
 compact_plot <- function(p) {
   if (is.null(p) || !inherits(p, "gg")) return(NULL)
-  ggplotGrob(p)
+  ggplot2::ggplotGrob(p)
 }
