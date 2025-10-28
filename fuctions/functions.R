@@ -485,7 +485,7 @@ get_dimensional_reduction <- function(assays) {
 
 ensure_pca <- function(seu, dslt = NULL, npcs = 30, assays = "RNA", level = "lineage") {
   reduction <- get_dimensional_reduction(assays)
-  needs_reduction <- !reduction %in% names(Reductions(seu))
+  needs_reduction <- !reduction %in% Reductions(seu)
   if (!needs_reduction) {
     existing <- Embeddings(seu, reduction)
     needs_reduction <- ncol(existing) < npcs
@@ -1493,13 +1493,13 @@ update_dslt_embedding <- function(dslt, assays, level, name, embedding) {
 #'
 #' @return 列表,包含更新后的Seurat对象和(可选)更新的dslt对象
 #' @export
-run_pca <- function(seu, dslt = NULL, npcs = 50, assays = "RNA", level = "single cell", verbose = FALSE) {
+run_pca <- function(seu, dslt = NULL, npcs = 50, assays = "RNA", level = "lineage", verbose = FALSE) {
   seu <- RunPCA(seu, npcs = npcs)
   dslt <- update_dslt_embedding(dslt, assays, level, "pca", Embeddings(seu, "pca"))
   list(seu = seu, dslt = dslt)
 }
 
-run_svd <- function(seu, dslt = NULL, npcs = 50, assays = "ATAC", level = "single cell", verbose = FALSE) {
+run_svd <- function(seu, dslt = NULL, npcs = 50, assays = "ATAC", level = "lineage", verbose = FALSE) {
   seu <- RunSVD(seu, n = npcs, reduction.name = "lsi", verbose = verbose)
   dslt <- update_dslt_embedding(dslt, assays, level, "lsi", Embeddings(seu, "lsi"))
   list(seu = seu, dslt = dslt)
