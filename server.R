@@ -809,12 +809,14 @@ server <- function(input, output, session) {
       new_order <- c(element_to_move, setdiff(all_names, element_to_move))
       state$dslt[["assays"]][["lineage"]] <- state$dslt[["assays"]][["lineage"]][new_order]
 
+      qc_light <- lapply(state$qc, compact_plot)
+
       tryCatch({
         snapshot_data <- list(
           dslt = state$dslt,
           pb_rna = state$seurat$pb_rna,
           pb_atac = state$seurat$pb_atac,
-          qc = state$qc
+          qc = qc_light
         )
         filename <- paste0("qc_snapshot_", format(Sys.time(), "%Y-%m-%d_%H%M%S"), ".rds")
         saveRDS(snapshot_data, file = filename)

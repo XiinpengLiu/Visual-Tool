@@ -1861,3 +1861,9 @@ plot_rna_atac_hist <- function(dslt, seu_rna, seu_atac = NULL, binwidth = 1) {
     p_rna + p_atac
   }
 }
+
+
+compact_plot <- function(p) {
+  if (is.null(p) || !inherits(p, "gg")) return(NULL)
+  ggplotGrob(p)
+}
