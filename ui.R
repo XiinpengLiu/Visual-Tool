@@ -593,9 +593,11 @@ ui <- dashboardPage(
               box(title = "Cluster/Archetype bubble", width = 12, plotOutput("lineage_bubble_plot"))
             ),
             fluidRow(
-              box(title = "Genomic track comparison", width = 12,
+              box(title = "Other", width = 12,
                 tabBox(width = 12,
-                  tabPanel("Cross-cluster violin", plotOutput("lineage_violin_plot"))
+                  tabPanel("Cross-cluster violin", plotOutput("lineage_violin_plot")),
+                  tabPanel("River", plotOutput("lineage_river_plot")),
+                  tabPanel("Lineage size histogram", plotOutput("lineage_size_histogram"))
                 )
               )
             )
