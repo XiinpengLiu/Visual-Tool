@@ -470,7 +470,7 @@ cluster_palette <- c(
   "#ebce2b", "#702c8c", "#db6917", "#96cde6", "#ba1c30", "#c0bd7f",
   "#7f7e80", "#5fa641", "#d485b2", "#4277b6", "#df8461", "#463397",
   "#e1a11a", "#91218c", "#e8e948", "#7e1510", "#92ae31", "#6f340d",
-  "#d32b1e", "#2b3514"
+  "#d32b1e", "#2b3514", "#ebce2b", "#702c8c", "#db6917", "#96cde6"
 )
 
 drug_palette <- rev(c('#67001f','#b2182b',"#f4a582",'#fddbc7',"#ffffff",'#d1e5f0','#92c5de','#2166ac','#053061'))
@@ -1778,7 +1778,18 @@ plot_lineage_river <- function(dslt = dslt, embedding_name = "cGR_smoothed") {
   cg_clust <- cg_clust %>%
     dplyr::select(Barcode, louvain) %>%
     dplyr::mutate(louvain = as.factor(louvain))
-  
+
+  arch_alpha <- dslt[["embeddings"]][["lineage"]][[embedding_name]][["archetype_alpha"]]
+  arch_df <- if (is.data.frame(arch_alpha)) arch_alpha else as.data.frame(arch_alpha)
+  if (!"Barcode" %in% names(arch_df)) arch_df$Barcode <- rownames(arch_df)
+  weight_cols <- setdiff(names(arch_df), "Barcode")
+  wt_mat <- as.matrix(arch_df[, weight_cols, drop = FALSE])
+  max_idx <- max.col(wt_mat, ties.method = "first")
+  arch_map <- data.frame(
+    Barcode = arch_df$Barcode,
+    archetype = factor(colnames(wt_mat)[max_idx], levels = colnames(wt_mat))
+  )
+
   atac_ok <- FALSE
   atac_try <- try(dslt[["columnMetadata"]][["ATAC"]][["lineage"]], silent = TRUE)
   if (!inherits(atac_try, "try-error") && !is.null(atac_try) && NROW(atac_try) > 0) atac_ok <- TRUE
@@ -1790,26 +1801,33 @@ plot_lineage_river <- function(dslt = dslt, embedding_name = "cGR_smoothed") {
     df <- rna_clust %>%
       dplyr::inner_join(cg_clust,  by = "Barcode") %>%
       dplyr::inner_join(atac_clust, by = "Barcode") %>%
+      dplyr::inner_join(arch_map,  by = "Barcode") %>%
       dplyr::mutate(s_rna = as.factor(s_rna), s_atac = as.factor(s_atac))
     dat_long <- df %>%
-      dplyr::transmute(Barcode, `ATAC louvain` = s_atac,
-                       `Drug: louvain` = louvain, `RNA louvain` = s_rna) %>%
-      tidyr::pivot_longer(cols = c(`ATAC louvain`, `Drug: louvain`, `RNA louvain`),
+      dplyr::transmute(Barcode,
+                       `Drug: louvain` = louvain,
+                       `RNA louvain`  = s_rna,
+                       atac           = s_atac,
+                       archetype      = archetype) %>%
+      tidyr::pivot_longer(cols = c(`Drug: louvain`, `RNA louvain`, atac, archetype),
                           names_to = "axis", values_to = "cluster") %>%
       dplyr::mutate(freq = 1L,
-                    axis = factor(axis, levels = c("ATAC louvain", "Drug: louvain", "RNA louvain")))
+                    axis = factor(axis, levels = c("Drug: louvain", "RNA louvain", "atac", "archetype")))
   } else {
     df <- rna_clust %>%
       dplyr::inner_join(cg_clust, by = "Barcode") %>%
+      dplyr::inner_join(arch_map, by = "Barcode") %>%
       dplyr::mutate(s_rna = as.factor(s_rna))
     dat_long <- df %>%
-      dplyr::transmute(Barcode, `Drug: louvain` = louvain, `RNA louvain` = s_rna) %>%
-      tidyr::pivot_longer(cols = c(`Drug: louvain`, `RNA louvain`),
+      dplyr::transmute(Barcode,
+                       `Drug: louvain` = louvain,
+                       `RNA louvain`  = s_rna,
+                       archetype      = archetype) %>%
+      tidyr::pivot_longer(cols = c(`Drug: louvain`, `RNA louvain`, archetype),
                           names_to = "axis", values_to = "cluster") %>%
       dplyr::mutate(freq = 1L,
-                    axis = factor(axis, levels = c("Drug: louvain", "RNA louvain")))
+                    axis = factor(axis, levels = c("Drug: louvain", "RNA louvain", "archetype")))
   }
-  
 
   p <- ggplot2::ggplot(
     dat_long,
@@ -1822,11 +1840,13 @@ plot_lineage_river <- function(dslt = dslt, embedding_name = "cGR_smoothed") {
     ggalluvial::geom_flow() +
     ggalluvial::geom_stratum(alpha = .5) +
     ggalluvial::stat_stratum(geom = "text", aes(label = after_stat(stratum)), size = 4) +
+    ggplot2::scale_fill_manual(values = cluster_palette) +
     ggplot2::theme_minimal() +
     ggplot2::theme(legend.position = "none")
   
   return(p)
 }
+
 
 
 plot_rna_atac_hist <- function(dslt, seu_rna, seu_atac = NULL, binwidth = 1) {
@@ -1845,6 +1865,7 @@ plot_rna_atac_hist <- function(dslt, seu_rna, seu_atac = NULL, binwidth = 1) {
     ggplot2::ggplot(df_f, ggplot2::aes(x = n_cells)) +
       ggplot2::geom_histogram(binwidth = binwidth, fill = "steelblue", color = "white") +
       ggplot2::labs(x = "n_cells", y = "Count (log1p)", title = title) +
+      scale_y_continuous(trans = "log10") +
       ggplot2::theme_classic()
   }
   
@@ -1861,7 +1882,7 @@ plot_rna_atac_hist <- function(dslt, seu_rna, seu_atac = NULL, binwidth = 1) {
 }
 
 
-compact_plot <- function(p, width = 3000, height = 1900, res = 240, bg = "white") {
+compact_plot <- function(p, width = 600, height = 300, res = 400, bg = "white") {
   if (is.null(p)) return(NULL)
   if (!requireNamespace("png", quietly = TRUE))  stop("Package 'png' is required.")
   if (!requireNamespace("ragg", quietly = TRUE)) stop("Package 'ragg' is required.")

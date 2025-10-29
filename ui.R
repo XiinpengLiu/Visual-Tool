@@ -235,8 +235,8 @@ ui <- dashboardPage(
                   h4(icon("stream"), "ATAC Fragments & Metadata"),
                   fileInput(
                     "single_cell_atac_fragments_file",
-                    "Fragments file (.tsv/.tsv.gz)",
-                    accept = c(".tsv", ".tsv.gz"),
+                    "Fragments file (.tsv/.tsv.gz/.tbi)",
+                    accept = c(".tsv", ".tsv.gz", ".tbi"),
                     buttonLabel = "Browse...",
                     placeholder = "No file selected"
                   ),
