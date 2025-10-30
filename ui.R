@@ -132,7 +132,7 @@ ui <- dashboardPage(
                 
                 pickerInput(
                   "denoise_assays_choice",
-                  tagList(icon("broom"), "Select assays to denoise"),
+                  tagList(icon("broom"), "Select assays to smooth"),
                   choices = NULL,
                   multiple = TRUE,
                   options = pickerOptions(
@@ -142,14 +142,14 @@ ui <- dashboardPage(
                     deselectAllText = "Deselect All"
                   )
                 ),
-                helpText("Apply adaptive kernel denoising to selected assays to reduce noise.")
+                helpText("Apply adaptive kernel smoothing to selected assays to reduce noise.")
               ),
               
               hr(),
               
               div(class = "action-buttons",
                 actionButton("load_lineage_rds", tagList(icon("file-import"), "Load Lineage"), class = "btn-primary"),
-                actionButton("apply_denoise", tagList(icon("magic"), "Apply Denoising"), class = "btn-warning")
+                actionButton("apply_denoise", tagList(icon("magic"), "Apply Smoothing"), class = "btn-warning")
               )
             )
           )
@@ -369,7 +369,7 @@ ui <- dashboardPage(
               br(),
               "1. After loading lineage data, proceed to", tags$b("QC Settings"), "to configure quality control parameters if required.",
               br(),
-              "2. Apply denoising if needed to reduce noise in drug response data.",
+              "2. Apply smoothing if needed to reduce noise in drug response data.",
               br(),
               "3. Explore lineage-level visualizations in the Main tab."
             )

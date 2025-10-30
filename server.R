@@ -497,11 +497,11 @@ server <- function(input, output, session) {
     
     selected_assays <- input$denoise_assays_choice
     if (is.null(selected_assays) || length(selected_assays) == 0) {
-      showNotification("Please select at least one assay to denoise.", type = "warning")
+      showNotification("Please select at least one assay to smooth.", type = "warning")
       return()
     }
     
-    withProgress(message = "Applying denoising...", value = 0, {
+    withProgress(message = "Applying smoothing...", value = 0, {
       tryCatch({
         selected_assays <- intersect(selected_assays, names(state$dslt[["assays"]][["lineage"]]))
         
@@ -516,7 +516,7 @@ server <- function(input, output, session) {
         
         # Denoise each selected assay
         for (assay in selected_assays) {
-          incProgress(progress_step, detail = paste("Denoising", assay))
+          incProgress(progress_step, detail = paste("smoothing", assay))
           res <- applyAdaptiveKernelDenoising(state$dslt, assay)
           state$dslt <- res$dslt
           denoised_names <- c(denoised_names, res$smoothed_assay_name)
@@ -524,7 +524,7 @@ server <- function(input, output, session) {
         
         # Denoise external drug matrix if present
         if (!is.null(state$drug_matrix)) {
-          incProgress(progress_step, detail = "Denoising external drug matrix")
+          incProgress(progress_step, detail = "smoothing external drug matrix")
           res <- applyAdaptiveKernelDenoising(state$dslt, "external_drug")
           state$dslt <- res$dslt
           denoised_names <- c(denoised_names, res$smoothed_assay_name)
@@ -554,7 +554,7 @@ server <- function(input, output, session) {
         }
         
         showNotification(
-          paste("Denoising completed! Smoothed assays:", paste(denoised_names, collapse = ", ")),
+          paste("Smoothing completed! Smoothed assays:", paste(denoised_names, collapse = ", ")),
           type = "message",
           duration = 5
         )
@@ -562,7 +562,7 @@ server <- function(input, output, session) {
         output$upload_summary <- renderText(compose_upload_summary(state))
         
       }, error = function(e) {
-        showNotification(paste("Denoising failed:", e$message), type = "error")
+        showNotification(paste("Smoothing failed:", e$message), type = "error")
       })
     })
   })
