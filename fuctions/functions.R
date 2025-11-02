@@ -1,13 +1,13 @@
-source("https://raw.githubusercontent.com/YevhenAkimov/graphics-R/main/graphics_functions.R")
+source("https://raw.githubusercontent.com/YevhenAkimov/graphics-R/main/graphics_functions.R")#Copyright (c) 2025 YevhenAkimov
 dslt_local_path <- file.path("fuctions", "DatasetLT_modi.R")
 if (file.exists(dslt_local_path)) {
   source(dslt_local_path)
 } else {
-  source("https://raw.githubusercontent.com/YevhenAkimov/Visual-Tool/main/fuctions/final/DatasetLT_modi.R")
+  source("https://raw.githubusercontent.com/YevhenAkimov/Visual-Tool/main/fuctions/final/DatasetLT_modi.R")#Copyright (c) 2025 YevhenAkimov
 }
-source("https://raw.githubusercontent.com/YevhenAkimov/phenomics_scripts/main/phenomics_helpers.R")
-source("https://raw.githubusercontent.com/YevhenAkimov/general_purpose_R/main/general_helpers.R")
-source("https://raw.githubusercontent.com/YevhenAkimov/graphics-R/main/colors.R")
+source("https://raw.githubusercontent.com/YevhenAkimov/phenomics_scripts/main/phenomics_helpers.R")#Copyright (c) 2025 YevhenAkimov
+source("https://raw.githubusercontent.com/YevhenAkimov/general_purpose_R/main/general_helpers.R")#Copyright (c) 2025 YevhenAkimov
+source("https://raw.githubusercontent.com/YevhenAkimov/graphics-R/main/colors.R")#Copyright (c) 2025 YevhenAkimov
 
 options(shiny.maxRequestSize = 10240 * 1024^2) # 1000 MB
 options(future.globals.maxSize = 2 * 1024^3)  # 2 GB
